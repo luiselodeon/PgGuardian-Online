@@ -2,8 +2,18 @@
   display: flex;
   align-items: center;
   justify-content: center;
+  padding: 8px 12px;
 }
 
 .health-ring {
-  filter: drop-shadow(0 0 14px rgba(59, 130, 246, 0.25));
+  /* Clean mechanical gauge: no diffuse muddy drop-shadows */
+  filter: none;
+  overflow: visible;
+}
+
+.health-ring text {
+  font-family: var(--font-mono);
+  font-feature-settings: "tnum" 1;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.02em;
 }

@@ -1,64 +1,71 @@
 :root {
-  /* ── Brand colors ──────────────────────────────────────────────── */
-  --brand-navy:      #070e8b;   /* dark navy blue                    */
-  --brand-orange:    #f79824;   /* accent orange                     */
-  --brand-blue:      #3b82f6;   /* electric blue                     */
-  --brand-light:     #bbdbf0;   /* light sky blue                    */
+  /* ── Deliberate Terminal / Observability Dark Palette ──────────── */
+  --bg-primary:      #090a0f;   /* Ground: pure deep obsidian           */
+  --bg-secondary:    #0d0f15;   /* Secondary: top bar, sidebar, footers */
+  --bg-card:         #12151e;   /* Surfaces: containers, tables, panels */
+  --bg-surface:      #12151e;
+  --bg-elevated:     #171b26;   /* Raised: headers, active states, modals */
+  --bg-hover:        #1d2331;   /* Hover: row highlights, button hovers */
+  --bg-input:        #06070a;   /* Inset: terminals, code blocks, inputs*/
 
-  /* ── Background (dark navy-tinted) ───────────────────────────── */
-  --bg-primary:      #080c18;
-  --bg-secondary:    #0d1220;
-  --bg-card:         #111829;
-  --bg-elevated:     #182035;
-  --bg-hover:        #1e2840;
-  --bg-input:        #0a0f1c;
+  /* ── Surgical Accents & Brand ──────────────────────────────────── */
+  --brand-navy:      #0a0f24;
+  --brand-orange:    #f59e0b;
+  --brand-blue:      #38bdf8;
+  --brand-light:     #94a3b8;
 
-  /* ── Accent — orange is the primary interactive color ─────────── */
-  --accent-primary:       #f79824;
-  --accent-primary-hover: #ffb347;
-  --accent-glow:          rgba(247, 152, 36, 0.18);
+  --accent-primary:       #f59e0b;   /* Surgical amber/orange indicator   */
+  --accent-primary-hover: #d97706;
+  --accent-glow:          rgba(245, 158, 11, 0.08);
 
-  /* ── Severity ─────────────────────────────────────────────────── */
-  --severity-high:        #ef4444;
-  --severity-high-bg:     rgba(239, 68, 68, 0.1);
-  --severity-medium:      #f79824;
-  --severity-medium-bg:   rgba(247, 152, 36, 0.12);
-  --severity-low:         #3b82f6;
-  --severity-low-bg:      rgba(59, 130, 246, 0.1);
-  --severity-ok:          #10b981;
-  --severity-ok-bg:       rgba(16, 185, 129, 0.1);
+  /* ── Severity & Status Signals ─────────────────────────────────── */
+  --severity-high:          #f43f5e;   /* Alert red                        */
+  --severity-high-bg:       rgba(244, 63, 94, 0.08);
+  --severity-high-border:   rgba(244, 63, 94, 0.28);
 
-  /* ── Text ─────────────────────────────────────────────────────── */
-  --text-primary:    #e2e8f0;
-  --text-secondary:  #8b9ab2;
-  --text-muted:      #3d4f6a;
-  --text-accent:     #bbdbf0;   /* light brand blue for links        */
+  --severity-medium:        #f59e0b;   /* Warning amber                    */
+  --severity-medium-bg:     rgba(245, 158, 11, 0.08);
+  --severity-medium-border: rgba(245, 158, 11, 0.28);
 
-  /* ── Borders ──────────────────────────────────────────────────── */
-  --border-subtle:   rgba(187, 219, 240, 0.06);
-  --border-card:     rgba(187, 219, 240, 0.09);
-  --border-accent:   rgba(247, 152, 36, 0.25);
+  --severity-low:           #38bdf8;   /* Telemetry cyan                   */
+  --severity-low-bg:        rgba(56, 189, 248, 0.08);
+  --severity-low-border:    rgba(56, 189, 248, 0.28);
 
-  /* ── Radius ───────────────────────────────────────────────────── */
-  --radius-sm:  6px;
-  --radius-md:  10px;
-  --radius-lg:  14px;
-  --radius-xl:  20px;
+  --severity-ok:            #10b981;   /* Healthy emerald                  */
+  --severity-ok-bg:         rgba(16, 185, 129, 0.08);
+  --severity-ok-border:     rgba(16, 185, 129, 0.28);
 
-  /* ── Shadows ──────────────────────────────────────────────────── */
-  --shadow-card:     0 2px 8px rgba(0, 0, 0, 0.4), 0 0 1px rgba(187, 219, 240, 0.04);
-  --shadow-elevated: 0 8px 32px rgba(0, 0, 0, 0.6);
-  --shadow-accent:   0 0 24px rgba(247, 152, 36, 0.25);
+  /* ── High-Contrast Technical Typography ───────────────────────── */
+  --text-primary:    #f8fafc;   /* Crisp chalk white for primary text */
+  --text-secondary:  #94a3b8;   /* Muted technical slate             */
+  --text-muted:      #64748b;   /* Structural labels and metadata     */
+  --text-accent:     #38bdf8;   /* Clean link cyan                   */
 
-  /* ── Sidebar ──────────────────────────────────────────────────── */
-  --sidebar-width: 260px;
+  /* ── Crisp 1px Precision Borders ──────────────────────────────── */
+  --border-subtle:   #1a202c;
+  --border-card:     #222a3a;
+  --border-strong:   #2e384e;
+  --border-accent:   rgba(245, 158, 11, 0.35);
 
-  /* ── Font ─────────────────────────────────────────────────────── */
-  --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
-  --font-mono: 'JetBrains Mono', 'Fira Code', monospace;
+  /* ── Disciplined Engineering Radii ────────────────────────────── */
+  --radius-xs:  2px;
+  --radius-sm:  4px;
+  --radius-md:  6px;
+  --radius-lg:  8px;
+  --radius-xl:  10px;
+
+  /* ── Shadows: Flat discipline at rest, clean drop on float ─────── */
+  --shadow-card:     none;
+  --shadow-elevated: 0 8px 24px rgba(0, 0, 0, 0.55);
+  --shadow-accent:   none;
+
+  /* ── Layout & Typography ──────────────────────────────────────── */
+  --sidebar-width: 250px;
+  --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  --font-mono: 'JetBrains Mono', 'Fira Code', 'SF Mono', Consolas, monospace;
 }
 
-/* Reset */
+/* Base Reset */
 *, *::before, *::after {
   box-sizing: border-box;
   margin: 0;
@@ -67,6 +74,8 @@
 
 html {
   font-size: 14px;
+  background-color: var(--bg-primary);
+  color-scheme: dark;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
@@ -75,74 +84,83 @@ body {
   font-family: var(--font-sans);
   background: var(--bg-primary);
   color: var(--text-primary);
-  line-height: 1.6;
+  line-height: 1.5;
+  letter-spacing: -0.01em;
   overflow-x: hidden;
 }
 
-/* Scrollbar */
+/* Mechanical Scrollbar */
 ::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
+  width: 5px;
+  height: 5px;
 }
 ::-webkit-scrollbar-track {
-  background: transparent;
+  background: var(--bg-primary);
 }
 ::-webkit-scrollbar-thumb {
-  background: var(--text-muted);
-  border-radius: 3px;
+  background: #222938;
+  border-radius: 2px;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: var(--text-secondary);
+  background: #3b465c;
 }
 
 /* Selection */
 ::selection {
-  background: var(--accent-primary);
-  color: white;
+  background: rgba(245, 158, 11, 0.25);
+  color: #fff;
 }
 
-/* Utilities */
-code, .mono {
+/* Precision Monospace & Numeric Utilities */
+code, .mono, pre, kbd, samp {
   font-family: var(--font-mono);
-  font-size: 0.9em;
+  font-feature-settings: "tnum" 1, "zero" 1;
+  font-variant-numeric: tabular-nums;
+}
+
+.tabular-nums {
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum" 1;
 }
 
 a {
   color: var(--text-accent);
   text-decoration: none;
+  transition: color 0.15s ease;
 }
 a:hover {
-  color: var(--accent-primary-hover);
+  color: #7dd3fc;
 }
 
 /* Animations */
 @keyframes fadeIn {
-  from { opacity: 0; transform: translateY(8px); }
+  from { opacity: 0; transform: translateY(4px); }
   to { opacity: 1; transform: translateY(0); }
-}
-
-@keyframes pulse-glow {
-  0%, 100% { box-shadow: 0 0 0 0 var(--accent-glow); }
-  50% { box-shadow: 0 0 20px 4px var(--accent-glow); }
-}
-
-@keyframes shimmer {
-  0% { background-position: -200% 0; }
-  100% { background-position: 200% 0; }
 }
 
 @keyframes spin {
   to { transform: rotate(360deg); }
 }
 
-.fade-in {
-  animation: fadeIn 0.4s ease-out forwards;
+@keyframes pulseLive {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
 }
 
-/* Loading skeleton */
+@keyframes shimmer {
+  0% { opacity: 0.5; }
+  50% { opacity: 0.85; }
+  100% { opacity: 0.5; }
+}
+
+.fade-in {
+  animation: fadeIn 0.2s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+/* Flat Skeleton Loader */
 .skeleton {
-  background: linear-gradient(90deg, var(--bg-card) 25%, var(--bg-elevated) 50%, var(--bg-card) 75%);
-  background-size: 200% 100%;
-  animation: shimmer 1.5s infinite;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-subtle);
+  animation: shimmer 1.8s ease-in-out infinite;
   border-radius: var(--radius-sm);
 }

@@ -1,35 +1,39 @@
 .severity-badge {
   display: inline-flex;
   align-items: center;
-  padding: 3px 10px;
-  border-radius: 20px;
-  font-size: 0.72rem;
+  justify-content: center;
+  height: 18px;
+  padding: 0 6px;
+  border-radius: var(--radius-xs);
+  font-family: var(--font-mono);
+  font-size: 0.65rem;
   font-weight: 600;
-  letter-spacing: 0.02em;
+  letter-spacing: 0.04em;
   text-transform: uppercase;
+  line-height: 1;
   white-space: nowrap;
 }
 
 .severity--high {
   background: var(--severity-high-bg);
   color: var(--severity-high);
-  border: 1px solid rgba(239, 68, 68, 0.2);
+  border: 1px solid var(--severity-high-border);
 }
 
 .severity--medium {
   background: var(--severity-medium-bg);
   color: var(--severity-medium);
-  border: 1px solid rgba(245, 158, 11, 0.2);
+  border: 1px solid var(--severity-medium-border);
 }
 
 .severity--low {
   background: var(--severity-low-bg);
   color: var(--severity-low);
-  border: 1px solid rgba(59, 130, 246, 0.2);
+  border: 1px solid var(--severity-low-border);
 }
 
 .severity--ok {
   background: var(--severity-ok-bg);
   color: var(--severity-ok);
-  border: 1px solid rgba(16, 185, 129, 0.2);
+  border: 1px solid var(--severity-ok-border);
 }

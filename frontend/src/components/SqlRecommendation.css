@@ -1,10 +1,11 @@
+/* ── SQL Recommendation: CLI Terminal Block ───────────────────────── */
 .sql-rec {
-  border-radius: var(--radius-md);
+  border-radius: var(--radius-xs);
   overflow: hidden;
-  border: 1px solid rgba(99, 102, 241, 0.25);
-  background: #0d1117;
+  border: 1px solid var(--border-card);
+  background: var(--bg-input);
   margin: 4px 0;
-  min-width: 250px;
+  min-width: 240px;
   width: 100%;
 }
 
@@ -12,60 +13,67 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 10px 16px;
-  background: rgba(99, 102, 241, 0.12);
-  border-bottom: 1px solid rgba(99, 102, 241, 0.2);
+  padding: 5px 10px;
+  background: var(--bg-elevated);
+  border-bottom: 1px solid var(--border-card);
 }
 
 .sql-rec-title {
   display: flex;
   align-items: center;
-  gap: 8px;
-  font-size: 0.78rem;
+  gap: 6px;
+  font-family: var(--font-mono);
+  font-size: 0.66rem;
   font-weight: 600;
-  color: #a5b4fc;
-  letter-spacing: 0.04em;
+  color: var(--text-muted);
+  letter-spacing: 0.05em;
   text-transform: uppercase;
 }
 
 .sql-rec-icon {
-  font-size: 1rem;
-  color: #818cf8;
+  font-size: 0.75rem;
+  color: var(--accent-primary);
 }
 
 .sql-rec-copy {
-  padding: 4px 12px;
-  border: 1px solid rgba(99, 102, 241, 0.35);
-  border-radius: 6px;
-  background: transparent;
-  color: #a5b4fc;
-  font-size: 0.73rem;
-  font-family: var(--font-sans);
+  padding: 2px 7px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-xs);
+  background: var(--bg-secondary);
+  color: var(--text-secondary);
+  font-size: 0.66rem;
+  font-family: var(--font-mono);
   font-weight: 500;
   cursor: pointer;
-  transition: all 0.2s ease;
+  transition: background-color 0.1s ease, color 0.1s ease, border-color 0.1s ease;
+  line-height: 1.4;
 }
 
 .sql-rec-copy:hover {
-  background: rgba(99, 102, 241, 0.2);
-  border-color: rgba(99, 102, 241, 0.6);
-  color: #c7d2fe;
+  background: var(--bg-hover);
+  border-color: var(--border-accent);
+  color: var(--text-primary);
+}
+
+.sql-rec-copy:active {
+  transform: translateY(1px);
 }
 
 .sql-rec-copy--done {
-  background: rgba(16, 185, 129, 0.15);
-  border-color: rgba(16, 185, 129, 0.4);
-  color: #6ee7b7;
+  background: var(--severity-ok-bg);
+  border-color: var(--severity-ok-border);
+  color: var(--severity-ok);
 }
 
 .sql-rec-body {
   margin: 0;
-  padding: 16px;
+  padding: 10px 14px;
   overflow-x: auto;
-  font-family: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', 'Courier New', monospace;
-  font-size: 0.80rem;
-  line-height: 1.7;
+  font-family: var(--font-mono);
+  font-size: 0.74rem;
+  line-height: 1.6;
   color: #e2e8f0;
+  background: var(--bg-input);
   white-space: pre;
   tab-size: 2;
 }
@@ -73,15 +81,20 @@
 .sql-rec-body code {
   color: inherit;
   background: none;
+  font-family: inherit;
+  font-size: inherit;
 }
 
 .sql-rec-body::-webkit-scrollbar {
-  height: 6px;
+  height: 5px;
 }
 .sql-rec-body::-webkit-scrollbar-track {
-  background: #0d1117;
+  background: var(--bg-input);
 }
 .sql-rec-body::-webkit-scrollbar-thumb {
-  background: rgba(99, 102, 241, 0.3);
-  border-radius: 3px;
+  background: #252e42;
+  border-radius: var(--radius-xs);
+}
+.sql-rec-body::-webkit-scrollbar-thumb:hover {
+  background: #3b465c;
 }
