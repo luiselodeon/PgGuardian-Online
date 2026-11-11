@@ -652,6 +652,37 @@ Tabla `analyses` en `app_db`:
 - `GET /api/analyses` filtra estrictamente con `WHERE user_id = %s`.
 - `GET /api/analyses/{id}` y `DELETE /api/analyses/{id}` validan formato UUID y ejecutan consultas con `WHERE id = %s AND user_id = %s`. Si el registro no existe, el UUID es inválido o pertenece a otro usuario, devuelven indistintamente `404 Not Found` (`{"detail": "Análisis no encontrado."}`), evitando enumeración de IDs o fuga de metadatos entre inquilinos.
 
+---
+
+## Frontend - Dashboard Multi-pestaña y Guía de Remediación de Hallazgos
+
+### 1. Archivos Creados y Modificados
+- **`backend/services/scan_service.py`** *(modificado)*: Se añadió el catálogo `_REMEDIATION_CATALOG`, `_resolve_severity` y `_enrich_detector_rows` dentro de `_evaluated_detector` para normalizar de forma retrocompatible `title`, `category`, `severity`, `recommendation`, `remediation_steps` y `sql_remediation` en todos los hallazgos de `/api/full-scan` y `/api/analyses/{id}`.
+- **`backend/tests/test_scan_service.py`** *(modificado)*: Se añadió la prueba `test_enriches_findings_with_remediation_guide_and_severity`.
+- **`frontend/src/components/AnalysisTabs.jsx` / `.css`** *(creados)*: Barra horizontal responsiva de pestañas que muestra la pestaña persistente **TiendaDB (Local)** y pestañas dinámicas cerrables por cada análisis sandbox o histórico abierto, con badge de origen (`Local` / `Sandbox` / `Historial`) y su `Health Score`.
+- **`frontend/src/components/RemediationPanel.jsx` / `.css`** y **`frontend/src/utils/remediation.js`** *(creados)*: Panel expandible reutilizable («¿Qué hacer? — Acciones sugeridas») que presenta resumen, diagnóstico, recomendación, lista de pasos `remediation_steps` y snippet SQL copiable (`SqlRecommendation`), junto con el helper `hasRemediationInfo`.
+- **`frontend/src/components/FindingList.jsx` / `.css`** *(creados)*: Componente compartido para listas de hallazgos tipo tarjeta con etiqueta de categoría, severidad y `RemediationPanel` expandible (elimina la duplicación de `FindingBlock` en `ConfigPage.jsx`, `HealthPage.jsx` y `QueriesPage.jsx`).
+- **`frontend/src/components/DataTable.jsx` / `.css`** *(modificados)*: Se añadió botón explícito **«¿Qué hacer?»** por fila y renderizado integrado de `RemediationPanel` al expandir cualquier hallazgo en tablas (`BloatPage`, `HealthPage`, `IndexesPage`, `QueriesPage`).
+- **`frontend/src/pages/Overview.jsx` / `.css`**, **`HistoryPage.jsx` / `.css`** y **`NewAnalysisModal.jsx`** *(modificados)*: `Overview` muestra el origen activo (`TiendaDB (Local · init/)` vs `Sandbox`) y conteo dinámico de detectores activos/N/A; `HistoryPage` añade botón **«Abrir pestaña»** y paneles de remediación en el detalle; `NewAnalysisModal` incorpora el botón **«Ver pestaña en Dashboard»**.
+- **`frontend/src/App.jsx`** *(modificado)*: Gestiona el estado multianálisis (`tabs`, `activeTabId`), `openSandboxTab`, `closeTab` y mantiene aislado el auto-refresh (30 s) sobre la pestaña local `tiendadb-local`.
+
+### 2. Modelo de Datos para Remediación de Hallazgos
+Cada fila dentro de `categories[cat].detectors[det].data` expone de manera uniforme en `/api/full-scan` y `/api/analyses/{id}` (preservando las columnas originales para retrocompatibilidad):
+- `title` (`string`): Resumen corto del hallazgo en español.
+- `category` (`string`): Categoría operacional del detector.
+- `severity` (`"HIGH" | "MEDIUM" | "LOW" | "OK" | "NO_APLICA"`): Severidad normalizada (evaluada por umbrales en `table_bloat` y `dead_tuples`, o catálogo del detector).
+- `evidence` (`string`): Diagnóstico puntual observado en la base.
+- `recommendation` (`string`): Explicación práctica de «¿Qué hacer?».
+- `remediation_steps` (`string[]`): Lista ordenada de acciones correctivas sugeridas.
+- `sql_remediation` (`string`, opcional): Sentencia SQL sugerida (`CREATE INDEX CONCURRENTLY`, `ALTER TABLE ... RESET (autovacuum_enabled)`, `ANALYZE`, `ALTER SYSTEM`, etc.), sincronizada con `sql_recommendation` / `sql_fix`.
+
+### 3. Flujo de Interacción entre `TiendaDB (Local)` y Bases Sandbox
+1. Al cargar la aplicación, `App.jsx` inicializa la pestaña no cerrable `tiendadb-local` («TiendaDB (Local)») mediante `GET /api/full-scan`. El auto-refresh de 30 s actualiza únicamente esa pestaña en segundo plano.
+2. Al completar un análisis en `NewAnalysisModal` (`POST /api/analyses`) o pulsar **«Abrir pestaña»** en `/history` (`GET /api/analyses/{id}`), `openSandboxTab(analysis)` agrega (o enfoca si ya existe) una pestaña dinámica con el `scan` ya cargado en memoria sin volver a consultar la API.
+3. Al alternar entre pestañas desde `AnalysisTabs`, `Overview`, `Sidebar` y las páginas de categorías (`Bloat`, `Configuración`, `Salud`, `Índices`, `Queries`) consumen `activeTab.scanData` instantáneamente.
+4. Cerrar una pestaña temporal elimina únicamente su entrada de la lista de pestañas de la sesión React sin borrar el reporte guardado en `app_db` (mientras que eliminar un análisis desde `/history` sí cierra su pestaña abierta si existiera).
+
+
 
 
 

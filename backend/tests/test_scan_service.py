@@ -143,6 +143,49 @@ class ScanServiceTests(unittest.TestCase):
         mock_scan.assert_called_once_with(fake_conn, is_sandbox=True)
         fake_conn.close.assert_called_once()
 
+    def test_enriches_findings_with_remediation_guide_and_severity(self):
+        patches = _patch_all_detectors(
+            {
+                "check_missing_indexes": [
+                    {
+                        "constraint_name": "fk_orders_customer",
+                        "table_name": "orders",
+                        "column_name": "customer_id",
+                        "referenced_table": "customers",
+                        "evidence": "FK sin índice.",
+                        "sql_recommendation": "CREATE INDEX CONCURRENTLY idx_orders_cust ON orders(customer_id);",
+                    }
+                ],
+                "check_disabled_autovacuum": [
+                    {
+                        "relname": "inventory",
+                        "reloptions": ["autovacuum_enabled=false"],
+                        "evidence": "Autovacuum desactivado.",
+                        "sql_recommendation": "ALTER TABLE inventory RESET (autovacuum_enabled);",
+                    }
+                ],
+            }
+        )
+        for p in patches.values():
+            p.start()
+        try:
+            res = scan_service.run_full_scan(MagicMock(), is_sandbox=True)
+        finally:
+            for p in patches.values():
+                p.stop()
+
+        fk_row = res.categories["indexes"]["detectors"]["missing_indexes"]["data"][0]
+        self.assertEqual(fk_row["title"], "Llave foránea sin índice")
+        self.assertEqual(fk_row["category"], "Auditoría de Índices")
+        self.assertEqual(fk_row["severity"], "HIGH")
+        self.assertTrue(len(fk_row["remediation_steps"]) >= 1)
+        self.assertIn("CREATE INDEX CONCURRENTLY", fk_row["sql_remediation"])
+
+        av_row = res.categories["bloat"]["detectors"]["disabled_autovacuum"]["data"][0]
+        self.assertEqual(av_row["severity"], "HIGH")
+        self.assertEqual(av_row["category"], "Bloat y Mantenimiento")
+        self.assertIn("autovacuum", av_row["recommendation"].lower())
+
 
 if __name__ == "__main__":
     unittest.main()

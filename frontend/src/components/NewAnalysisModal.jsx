@@ -18,7 +18,7 @@ function hasValidSqlExtension(filename) {
   return lastDot > 0 && clean.slice(lastDot).toLowerCase() === '.sql'
 }
 
-export default function NewAnalysisModal({ onClose, onCreated }) {
+export default function NewAnalysisModal({ onClose, onCreated, onOpenResultTab }) {
   const fileInputRef = useRef(null)
   const [analysisName, setAnalysisName] = useState('')
   const [items, setItems] = useState([])
@@ -237,7 +237,16 @@ export default function NewAnalysisModal({ onClose, onCreated }) {
               <button type="button" className="btn-secondary" onClick={handleReset}>
                 Cargar otros archivos
               </button>
-              <button type="button" className="btn-primary" onClick={onClose}>
+              {onOpenResultTab && (
+                <button
+                  type="button"
+                  className="btn-primary"
+                  onClick={() => onOpenResultTab(result)}
+                >
+                  Ver pestaña en Dashboard
+                </button>
+              )}
+              <button type="button" className="btn-secondary" onClick={onClose}>
                 Cerrar
               </button>
             </div>

@@ -1,37 +1,6 @@
 import DataTable from '../components/DataTable'
-import SqlRecommendation from '../components/SqlRecommendation'
-import SeverityBadge from '../components/SeverityBadge'
+import FindingList from '../components/FindingList'
 import './PageCommon.css'
-
-function FindingBlock({ data, emptyMessage }) {
-  if (!data || data.length === 0) {
-    return <p className="finding-empty">{emptyMessage || 'Sin hallazgos detectados'}</p>
-  }
-  return (
-    <div className="finding-list">
-      {data.map((item, i) => (
-        <div key={i} className="finding-card">
-          <div className="finding-card-header">
-            <span className="finding-card-title">{item.finding_id || item.title || 'Hallazgo'}</span>
-            {item.severity && <SeverityBadge severity={item.severity} />}
-          </div>
-          {(item.evidence || item.description) && (
-            <p className="finding-card-evidence">
-              <span className="rec-evidence-icon">◈</span>
-              {item.evidence || item.description}
-            </p>
-          )}
-          {(item.recommendation) && (
-            <p className="finding-card-recommendation">
-              {item.recommendation}
-            </p>
-          )}
-          <SqlRecommendation sql={item.sql_recommendation || item.sql_fix} />
-        </div>
-      ))}
-    </div>
-  )
-}
 
 export default function HealthPage({ scanData, isLoading }) {
   const health = scanData?.categories?.health
@@ -89,7 +58,7 @@ export default function HealthPage({ scanData, isLoading }) {
           {idleData.length === 0 ? (
             <p className="finding-empty">No se detectaron sesiones idle in transaction</p>
           ) : (
-            <FindingBlock data={idleData} />
+            <FindingList data={idleData} />
           )}
         </section>
       </div>

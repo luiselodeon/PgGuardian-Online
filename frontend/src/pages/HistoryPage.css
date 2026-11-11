@@ -193,7 +193,13 @@
   list-style: none;
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 10px;
+}
+
+.detail-detector-item {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
 }
 
 .detail-detector-row {

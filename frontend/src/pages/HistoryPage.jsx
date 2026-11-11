@@ -1,10 +1,13 @@
 import { useEffect, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import {
   deleteAnalysis,
   getAnalysisDetail,
   listAnalyses,
 } from '../api/pgguardian'
 import SeverityBadge from '../components/SeverityBadge'
+import RemediationPanel from '../components/RemediationPanel'
+import { hasRemediationInfo } from '../utils/remediation'
 import './PageCommon.css'
 import './HistoryPage.css'
 
@@ -18,7 +21,8 @@ function formatDate(iso) {
   return new Date(iso).toLocaleString('es-MX')
 }
 
-export default function HistoryPage({ currentUser, refreshKey }) {
+export default function HistoryPage({ currentUser, refreshKey, onOpenTab, onDeleted }) {
+  const navigate = useNavigate()
   const [items, setItems] = useState([])
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState(null)
@@ -67,6 +71,25 @@ export default function HistoryPage({ currentUser, refreshKey }) {
     }
   }
 
+  const handleOpenInTab = async (analysisId) => {
+    setIsLoadingDetail(true)
+    setError(null)
+    try {
+      const detail =
+        selectedDetail?.id === analysisId
+          ? selectedDetail
+          : await getAnalysisDetail(analysisId)
+      if (onOpenTab) {
+        onOpenTab(detail)
+        navigate('/')
+      }
+    } catch (err) {
+      setError(err.message)
+    } finally {
+      setIsLoadingDetail(false)
+    }
+  }
+
   const handleDelete = async (analysisId, name) => {
     setDeletingId(analysisId)
     setError(null)
@@ -76,6 +99,7 @@ export default function HistoryPage({ currentUser, refreshKey }) {
       if (selectedDetail?.id === analysisId) {
         setSelectedDetail(null)
       }
+      if (onDeleted) onDeleted(analysisId)
     } catch (err) {
       setError(`Error al eliminar "${name}": ${err.message}`)
     } finally {
@@ -155,6 +179,14 @@ export default function HistoryPage({ currentUser, refreshKey }) {
                         <button
                           type="button"
                           className="history-btn"
+                          onClick={() => handleOpenInTab(item.id)}
+                          disabled={isLoadingDetail}
+                        >
+                          Abrir pestaña
+                        </button>
+                        <button
+                          type="button"
+                          className="history-btn"
                           onClick={() => handleInspect(item.id)}
                           disabled={isLoadingDetail}
                         >
@@ -205,14 +237,20 @@ export default function HistoryPage({ currentUser, refreshKey }) {
                 <ul className="detail-detector-list">
                   {Object.entries(cat.detectors || {}).map(([detKey, det]) => {
                     const isNa = det.status === 'no_aplica'
+                    const firstActionable = !isNa && Array.isArray(det.data)
+                      ? det.data.find((row) => hasRemediationInfo(row))
+                      : null
                     return (
-                      <li key={detKey} className="detail-detector-row">
-                        <span>{det.label}</span>
-                        {isNa ? (
-                          <SeverityBadge severity="NO_APLICA" />
-                        ) : (
-                          <span className="detail-count-badge">{det.count} hallazgo(s)</span>
-                        )}
+                      <li key={detKey} className="detail-detector-item">
+                        <div className="detail-detector-row">
+                          <span>{det.label}</span>
+                          {isNa ? (
+                            <SeverityBadge severity="NO_APLICA" />
+                          ) : (
+                            <span className="detail-count-badge">{det.count} hallazgo(s)</span>
+                          )}
+                        </div>
+                        {firstActionable && <RemediationPanel finding={firstActionable} />}
                       </li>
                     )
                   })}
