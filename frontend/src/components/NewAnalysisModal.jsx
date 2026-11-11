@@ -188,6 +188,12 @@ export default function NewAnalysisModal({ onClose }) {
                 <div className="result-meta">
                   ID: <code className="mono">{result.id}</code> · Estado: <strong>{result.status}</strong> ·{' '}
                   {result.file_count} archivo(s) · {formatBytes(result.total_size_bytes)}
+                  {result.sandbox_db_name && (
+                    <>
+                      {' '}· Sandbox: <code className="mono">{result.sandbox_db_name}</code> ·{' '}
+                      {result.executed_statements} sentencias ({result.execution_time_ms} ms)
+                    </>
+                  )}
                 </div>
               </div>
             </div>

@@ -42,11 +42,16 @@ export async function createAnalysis(files, order) {
   const data = await res.json().catch(() => null);
   if (!res.ok) {
     const detail = data?.detail;
-    throw new Error(
-      typeof detail === 'string'
-        ? detail
-        : `Error al validar el análisis (${res.status})`,
-    );
+    let message = `Error al validar el análisis (${res.status})`;
+    if (typeof detail === 'string') {
+      message = detail;
+    } else if (detail && typeof detail === 'object') {
+      const location = detail.filename && detail.line
+        ? ` (${detail.filename}, línea ${detail.line})`
+        : '';
+      message = `${detail.message || message}${location}`;
+    }
+    throw new Error(message);
   }
   return data;
 }

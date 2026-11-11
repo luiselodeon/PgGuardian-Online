@@ -38,12 +38,15 @@ class AnalysisFileSummary(BaseModel):
 
 
 class AnalysisCreateResponse(BaseModel):
-    """Respuesta al validar y registrar en memoria un nuevo análisis SQL."""
+    """Respuesta al validar y ejecutar en sandbox un nuevo análisis SQL."""
     id: str
     status: str
     message: str
     file_count: int
     total_size_bytes: int
+    sandbox_db_name: str
+    executed_statements: int
+    execution_time_ms: int
     files: list[AnalysisFileSummary]
     created_at: datetime
 

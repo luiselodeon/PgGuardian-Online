@@ -521,4 +521,56 @@ Todos los mensajes de error se devuelven en español bajo el campo estándar `de
 - **`413 Content Too Large`:** Cualquier archivo supera 10 MB o el peso acumulado supera 25 MB.
 - **`422 Unprocessable Entity`:** Extensión distinta de `.sql` o contenido con bytes no decodificables en UTF-8 estricto.
 
+---
+
+## RF-01.3 y RF-01.4 - Registro de Implementación, Seguridad y Sandbox
+
+### 1. Archivos Creados y Modificados
+- **`.env`** *(modificado)*: Se añadieron las variables dedicadas para el servidor sandbox (`SANDBOX_DB_NAME`, `SANDBOX_DB_ADMIN_USER`, `SANDBOX_DB_ADMIN_PASSWORD`, `SANDBOX_DB_EXEC_USER`, `SANDBOX_DB_EXEC_PASSWORD`), desacopladas de `DB_*` (TiendaDB / `app_db`).
+- **`docker-compose.yml`** *(modificado)*: Se incorporó el servicio aislado `sandbox_db` (`postgres:16`, contenedor `pgguardian_sandboxdb`, volumen `sandbox_data`, sin puertos públicos expuestos ni scripts de `init/`), y se inyectaron las variables `SANDBOX_DB_*` y la dependencia `depends_on: sandbox_db (service_healthy)` en el servicio `api`.
+- **`backend/requirements.txt`** *(modificado)*: Se agregó `pglast==6.17` (parser nativo de PostgreSQL 16 vía `libpg_query`).
+- **`backend/services/__init__.py`** *(creado)*: Marcador de paquete para la capa de servicios del backend.
+- **`backend/services/sql_validator.py`** *(creado)*: Servicio de análisis estático AST con `pglast` (`validate_sql_script`, `validate_scripts`, `_SafetyVisitor`, `SqlValidationError`, `ParsedStatement`).
+- **`backend/services/sandbox_runner.py`** *(creado)*: Servicio de aprovisionamiento y ejecución aislada en `sandbox_db` (`execute_in_sandbox`, `_provision_sandbox_db`, `_ensure_unprivileged_role`, `_drop_sandbox_db`, `SandboxExecutionError`, `SandboxResult`).
+- **`backend/api/schemas.py`** *(modificado)*: Se extendió `AnalysisCreateResponse` con `sandbox_db_name`, `executed_statements` y `execution_time_ms`.
+- **`backend/api/routers/analyses.py`** *(modificado)*: Se integró la secuencia RF-01.1/01.2 → RF-01.3 (`validate_scripts`) → RF-01.4 (`run_in_threadpool(execute_in_sandbox, ...)`) antes de devolver `201 Created` (`status: "ejecutado"`).
+- **`frontend/src/api/pgguardian.js`** y **`frontend/src/components/NewAnalysisModal.jsx`** *(modificados)*: Soporte para formatear errores estructurados (`detail` con archivo y línea) y mostrar `sandbox_db_name`, `executed_statements` y `execution_time_ms` tras la ejecución.
+- **`backend/tests/test_sql_validator.py`** y **`backend/tests/test_sandbox_runner.py`** *(creados)* + **`backend/tests/test_analyses.py`** *(actualizado)*: Cobertura unitaria para reglas AST, aislamiento de configuración, fail-fast, limpieza y timeout de 120 s.
+
+### 2. Nodos de `pglast` Inspeccionados y Reglas AST (RF-01.3)
+El validador utiliza `pglast.parse_sql`, `pglast.parser.scan` (cálculo exacto de línea y fragmento omitiendo comentarios iniciales sin usar expresiones regulares) y `pglast.visitors.Visitor` sobre cada `RawStmt`:
+
+| Regla (`rule`) | Nodos AST de `pglast` inspeccionados | Condición de rechazo |
+|---|---|---|
+| `alter_system` | `AlterSystemStmt` | Rechazo incondicional (`ALTER SYSTEM SET/RESET`). |
+| `copy_program` / `copy_file` | `CopyStmt` | Rechazo cuando `is_program == True` o `filename is not None` (permite `COPY ... FROM STDIN`). |
+| `role_management` | `CreateRoleStmt`, `AlterRoleStmt`, `AlterRoleSetStmt`, `DropRoleStmt`, `GrantRoleStmt`, `VariableSetStmt` | Rechazo de creación/alteración/eliminación/asignación de roles y `SET ROLE` / `SET SESSION AUTHORIZATION`. |
+| `critical_privilege` | `GrantStmt`, `AlterOwnerStmt` | Rechazo sobre `OBJECT_DATABASE`, `OBJECT_TABLESPACE`, `OBJECT_FDW`, `OBJECT_FOREIGN_SERVER`, `OBJECT_PARAMETER_ACL` o esquemas del sistema (`pg_*`, `information_schema`). |
+| `database_management` | `CreatedbStmt`, `DropdbStmt`, `AlterDatabaseStmt`, `AlterDatabaseSetStmt`, `AlterDatabaseRefreshCollStmt`, `AlterOwnerStmt`, `RenameStmt` | Rechazo de cualquier creación, eliminación, cambio de dueño, renombrado o `ALTER DATABASE`. |
+| `system_object_management` | `CreateTableSpaceStmt`, `DropTableSpaceStmt`, `CreateFdwStmt`, `AlterFdwStmt`, `CreateForeignServerStmt`, `AlterForeignServerStmt`, `CreateUserMappingStmt`, `DropStmt` | Rechazo de tablespaces, wrappers/servidores externos y `DROP` sobre lenguajes/FDW/servidores. |
+| `disallowed_extension` | `CreateExtensionStmt`, `AlterExtensionStmt`, `AlterExtensionContentsStmt` | Bloqueo salvo que `extname` pertenezca a `ALLOWED_EXTENSIONS` (`uuid-ossp`, `pgcrypto`, `pg_trgm`, `citext`, `hstore`, `unaccent`, `btree_gin`, `btree_gist`). |
+| `untrusted_language` | `CreatePLangStmt`, `CreateFunctionStmt`, `DoStmt` | Rechazo de `CREATE LANGUAGE` y de funciones/bloques `DO` cuyo parámetro `language` no pertenezca a `ALLOWED_FUNCTION_LANGUAGES` (`sql`, `plpgsql`). |
+
+### 3. Aislamiento, Privilegios del Rol y Timeout de 120 s (RF-01.4)
+- **Desacoplamiento total:** `_get_sandbox_config()` lee exclusivamente `SANDBOX_DB_*` y nunca invoca `api.database.get_connection()` ni usa variables `DB_*`.
+- **Aprovisionamiento por análisis:** Se genera una base única `sandbox_<uuid_hex>` mediante la conexión administrativa (`SANDBOX_DB_ADMIN_USER`), se revoca el acceso `PUBLIC` sobre la base (`REVOKE ALL ON DATABASE ... FROM PUBLIC`) y, dado el endurecimiento de PostgreSQL 15/16 sobre el esquema `public`, se transfiere la propiedad del esquema `public` de esa base efímera al rol ejecutor.
+- **Control de privilegios:** `_ensure_unprivileged_role()` crea o reasegura `SANDBOX_DB_EXEC_USER` con `LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOREPLICATION`. La ejecución de scripts se realiza exclusivamente con una conexión independiente bajo ese rol hacia `sandbox_<uuid_hex>`.
+- **Timeout global de 120 s y fail-fast:** `execute_in_sandbox` mantiene un reloj monotónico (`deadline = start + 120s`) y ejecuta cada sentencia validada en orden calculando `remaining_ms = int((deadline - time.monotonic()) * 1000)` y aplicando `SET statement_timeout = %s` antes de cada sentencia (impidiendo evasiones mediante `SET statement_timeout = 0` en un script). Al primer error SQL o vencimiento del límite (`57014`), aborta de inmediato, cierra la conexión ejecutora y ejecuta `DROP DATABASE IF EXISTS <sandbox> WITH (FORCE)` para evitar bases huérfanas.
+
+### 4. Formato de Error Estructurado
+Ante fallos de sintaxis o AST (`422`), errores SQL en sandbox (`422`), timeout de 120 s (`408`) o indisponibilidad de `sandbox_db` (`503`), FastAPI devuelve el campo `detail` estructurado en español:
+```json
+{
+  "code": "SQL_AST_BLOCKED | SQL_SYNTAX_ERROR | SANDBOX_EXECUTION_ERROR | SANDBOX_TIMEOUT | SANDBOX_CONNECTION_ERROR",
+  "message": "Descripción contextualizada en español",
+  "filename": "archivo.sql",
+  "line": 12,
+  "rule": "alter_system",
+  "statement": "ALTER SYSTEM SET work_mem = '64MB'",
+  "pgcode": "42P01",
+  "pg_error": "Mensaje original de PostgreSQL (cuando aplica en ejecución)"
+}
+```
+
+
 

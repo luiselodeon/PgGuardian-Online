@@ -1,8 +1,9 @@
 """
-PgGuardian API — Router de Análisis de Scripts SQL (RF-01.1 y RF-01.2)
+PgGuardian API — Router de Análisis de Scripts SQL (RF-01.1 a RF-01.4)
 
-Recibe y valida la carga ordenada de hasta 5 archivos .sql en UTF-8 estricto,
-respetando los límites de tamaño de 10 MB por archivo y 25 MB en total.
+Recibe y valida la carga ordenada de hasta 5 archivos .sql en UTF-8 estricto
+(10 MB por archivo, 25 MB totales), valida su AST con pglast y los ejecuta en
+una base temporal aislada dentro de sandbox_db.
 """
 
 from datetime import datetime, timezone
@@ -11,8 +12,11 @@ from pathlib import PurePosixPath
 from uuid import uuid4
 
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile, status
+from starlette.concurrency import run_in_threadpool
 
 from api.schemas import AnalysisCreateResponse, AnalysisFileSummary
+from services.sandbox_runner import SandboxExecutionError, execute_in_sandbox
+from services.sql_validator import SqlValidationError, validate_scripts
 
 router = APIRouter(prefix="/api/analyses", tags=["Análisis"])
 
@@ -119,6 +123,7 @@ async def _read_and_validate_file(upload: UploadFile, current_total: int) -> dic
         "filename": filename,
         "size_bytes": file_size,
         "line_count": len(content.splitlines()),
+        "content": content,
     }
 
 
@@ -157,24 +162,50 @@ async def create_analysis(
             total_size += meta["size_bytes"]
             validated_files.append(meta)
 
+        ordered_entries = [validated_files[idx] for idx in execution_order]
+
+        try:
+            parsed_scripts = validate_scripts(
+                [(entry["filename"], entry["content"]) for entry in ordered_entries]
+            )
+        except SqlValidationError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=exc.to_dict(),
+            ) from exc
+
+        try:
+            sandbox_res = await run_in_threadpool(execute_in_sandbox, parsed_scripts)
+        except SandboxExecutionError as exc:
+            if exc.code == "SANDBOX_TIMEOUT":
+                err_status = status.HTTP_408_REQUEST_TIMEOUT
+            elif exc.code == "SANDBOX_CONNECTION_ERROR":
+                err_status = status.HTTP_503_SERVICE_UNAVAILABLE
+            else:
+                err_status = status.HTTP_422_UNPROCESSABLE_ENTITY
+            raise HTTPException(status_code=err_status, detail=exc.to_dict()) from exc
+
         ordered_summary = [
             AnalysisFileSummary(
                 order=position,
-                filename=validated_files[idx]["filename"],
-                size_bytes=validated_files[idx]["size_bytes"],
+                filename=entry["filename"],
+                size_bytes=entry["size_bytes"],
                 encoding="utf-8",
-                line_count=validated_files[idx]["line_count"],
+                line_count=entry["line_count"],
             )
-            for position, idx in enumerate(execution_order, start=1)
+            for position, entry in enumerate(ordered_entries, start=1)
         ]
 
-        # shortcut: análisis validado en memoria sin persistencia ni ejecución en sandbox_db; actualizar en RF-01.4/RF-02.
+        # shortcut: análisis ejecutado en sandbox sin persistencia en app_db ni detectores aún; completar en RF-01.5/RF-02.
         return AnalysisCreateResponse(
             id=str(uuid4()),
-            status="validado",
-            message="Scripts SQL validados correctamente y listos en el orden de ejecución.",
+            status="ejecutado",
+            message="Scripts SQL validados y ejecutados correctamente en sandbox aislado.",
             file_count=len(ordered_summary),
             total_size_bytes=total_size,
+            sandbox_db_name=sandbox_res.sandbox_db_name,
+            executed_statements=sandbox_res.executed_statements,
+            execution_time_ms=sandbox_res.execution_time_ms,
             files=ordered_summary,
             created_at=datetime.now(timezone.utc),
         )
