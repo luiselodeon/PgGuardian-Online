@@ -194,6 +194,13 @@ export default function NewAnalysisModal({ onClose }) {
                       {result.executed_statements} sentencias ({result.execution_time_ms} ms)
                     </>
                   )}
+                  {result.scan && (
+                    <>
+                      {' '}· Health Score: <strong>{result.scan.health_score}/100</strong> ·{' '}
+                      {result.scan.total_findings} hallazgo(s) ·{' '}
+                      {result.scan.evaluated_detectors} detectores activos / {result.scan.not_applicable_detectors} N/A
+                    </>
+                  )}
                 </div>
               </div>
             </div>

@@ -124,6 +124,17 @@ def _connect(cfg: SandboxConfig, *, dbname: str, user: str, password: str):
     return conn
 
 
+def connect_sandbox_db(sandbox_db_name: str):
+    """Abre una conexión sin privilegios hacia una base sandbox específica."""
+    cfg = _get_sandbox_config()
+    return _connect(
+        cfg,
+        dbname=sandbox_db_name,
+        user=cfg.exec_user,
+        password=cfg.exec_password,
+    )
+
+
 def _ensure_unprivileged_role(admin_cur, exec_user: str, exec_password: str) -> None:
     """Asegura que el rol ejecutor exista sin privilegios administrativos."""
     role_ident = sql.Identifier(exec_user)

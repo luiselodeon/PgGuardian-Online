@@ -572,5 +572,52 @@ Ante fallos de sintaxis o AST (`422`), errores SQL en sandbox (`422`), timeout d
 }
 ```
 
+---
+
+## RF-01.5 y RF-01.6 - Desacoplamiento de Conexión y Detectores N/A
+
+### 1. Archivos Creados y Modificados
+- **`backend/services/scan_service.py`** *(creado)*: Nuevo orquestador desacoplado [`run_full_scan(conn, is_sandbox: bool = False)`] junto con `_safe_run`, `_serialize`, `_not_applicable_detector` y la lógica de normalización del puntaje.
+- **`backend/services/sandbox_runner.py`** *(modificado)*: Se añadió `connect_sandbox_db(sandbox_db_name)` para abrir conexiones con el rol sin privilegios (`SANDBOX_DB_EXEC_USER`) directamente sobre la base temporal del análisis.
+- **`backend/detectors/bloat.py`** *(modificado)*: En `check_table_bloat(conn)`, la creación de la extensión `pgstattuple` ahora verifica previamente `pg_extension` y captura `psycopg2.Error` (usando `SAVEPOINT` si `autocommit=False`), evitando fallos bajo el rol `NOSUPERUSER` de `sandbox_db` sin alterar su ejecución en TiendaDB.
+- **`backend/detectors/health.py`** *(modificado)*: En `check_partitioning_candidates(conn)`, la instalación de `pg_partman` se protege verificando `pg_extension` y capturando `psycopg2.Error`, permitiendo ejecutar el diagnóstico estructural sobre `sandbox_db` sin requerir `pg_partman` ni superusuario.
+- **`backend/api/main.py`** *(modificado)*: Se eliminó la lógica duplicada del escaneo y `GET /api/full-scan` ahora delega a `run_full_scan(conn, is_sandbox=False)` inyectando `Depends(get_connection)` para preservar compatibilidad completa con TiendaDB (RNF-05).
+- **`backend/api/schemas.py`** *(modificado)*: Se añadieron los campos retrocompatibles `is_sandbox: bool = False`, `evaluated_detectors: int = 22` y `not_applicable_detectors: int = 0` a `FullScanResponse`, y el campo `scan: FullScanResponse` a `AnalysisCreateResponse`.
+- **`backend/api/routers/analyses.py`** *(modificado)*: Tras ejecutar los scripts en `sandbox_db`, invoca `_scan_sandbox(sandbox_res.sandbox_db_name)` mediante `connect_sandbox_db(...)` y `run_full_scan(sandbox_conn, is_sandbox=True)` (nunca usa `get_connection()`), devolviendo el reporte en `scan` (`status: "completado"`).
+- **`frontend/src/components/SeverityBadge.jsx` / `.css`**, **`CategoryCard.jsx` / `.css`** y **`NewAnalysisModal.jsx`** *(modificados)*: Soporte visual para severidad/estado `NO_APLICA` (`N/A` / `No aplica`) y visualización del `Health Score`, hallazgos y detectores activos vs. N/A en el resumen del modal.
+- **`backend/tests/test_scan_service.py`** *(creado)* y **`backend/tests/test_analyses.py`** *(actualizado)*: Pruebas unitarias de inyección de conexión sandbox, omisión de detectores N/A, normalización del score y no-regresión en modo producción.
+
+### 2. Firma y Estructura de `run_full_scan(conn, is_sandbox: bool = False)`
+- **Firma:** `run_full_scan(conn, is_sandbox: bool = False) -> FullScanResponse` en `backend/services/scan_service.py`.
+- **Inyección de conexión:** Todos los detectores reciben `conn` como primer argumento obligatorio (`check_*(conn)` / `evaluate_*(conn)`). En `GET /api/full-scan` se pasa la conexión de `get_connection()` con `is_sandbox=False`; en `POST /api/analyses` se pasa la conexión efímera de `connect_sandbox_db(sandbox_db_name)` con `is_sandbox=True`.
+- **Estructura retrocompatible del reporte:** Cada detector dentro de `categories[cat]["detectors"][key]` mantiene `label`, `count` y `data`, añadiendo `status` (`"ok"` | `"warning"` | `"no_aplica"`). Cuando es `"no_aplica"`, incluye `status_label: "No aplica"`, `reason` en español, `count: 0` (para no inflar contadores en UI) y una entrada descriptiva en `data` con `severity: "NO_APLICA"`.
+
+### 3. Detectores Catalogados como «no aplica» en `is_sandbox=True`
+Se excluyen de ejecución y penalización los 9 detectores en `SANDBOX_NOT_APPLICABLE_DETECTORS` por depender de tráfico en vivo o estadísticas acumuladas en `pg_stat_*`:
+1. `health.idle_in_transaction` (`pg_stat_activity`: sesiones activas / *idle in transaction*).
+2. `indexes.unused_indexes` (`pg_stat_user_indexes`: `idx_scan = 0` sin tráfico previo).
+3. `indexes.covering_candidates` (`pg_stat_statements`: consultas frecuentes candidatas a `INCLUDE`).
+4. `indexes.wildcard_searches` (`pg_stat_statements`: consultas ejecutadas con `LIKE '%...%'`).
+5. `queries.temp_spills` (`pg_stat_statements`: bloques temporales escritos por consulta).
+6. `queries.seq_scans` (`pg_stat_statements` + `EXPLAIN`: consultas top con *Seq Scan*).
+7. `queries.top_time_queries` (`pg_stat_statements`: consultas con mayor tiempo acumulado).
+8. `queries.db_temp_usage` (`pg_stat_database`: archivos temporales acumulados en BD).
+9. `queries.explain_spills` (`pg_stat_statements` + `EXPLAIN ANALYZE`: *sort/hash spills*).
+
+Justificación reportada en español: `"No aplica en bases sandbox recién creadas porque no cuentan con estadísticas acumuladas ni métricas de tráfico en vivo."`
+
+### 4. Fórmula Ajustada del Health Score (0–100)
+Cada uno de los 22 detectores ponderados posee su peso nominal en `_DETECTOR_WEIGHTS` (suma total `total_weight = 114`):
+- **Penalización activa (`active_penalty`):** Suma de `hallazgos * peso` exclusivamente sobre los detectores ejecutados (`key not in excluded`). Los 9 detectores `no_aplica` aportan `0` hallazgos y se omiten de `active_weight`.
+- **Normalización sobre detectores válidos (`active_weight`):**
+  $$\text{normalized\_penalty} = \text{round}\left(\text{active\_penalty} \times \frac{\text{total\_weight}}{\text{active\_weight}}\right)$$
+  $$\text{health\_score} = \max\big(0,\; \min(100,\; 100 - \text{normalized\_penalty})\big)$$
+- En modo sandbox (`is_sandbox=True`), `active_weight = 69` (13 detectores activos, 9 `no_aplica`). En modo TiendaDB (`is_sandbox=False`), `excluded` está vacío (`active_weight == total_weight == 114`), por lo que el factor de escala es `1.0` y el cálculo coincide exactamente con la fórmula original.
+
+### 5. Verificación de No-Regresión (TiendaDB)
+- `GET /api/full-scan` sigue operando con `Depends(get_connection)` (`is_sandbox=False`), ejecutando los 22 detectores y devolviendo el mismo contrato JSON (`health_score`, `total_findings`, `categories`, `executed_at`).
+- Los routers individuales existentes (`/api/bloat/*`, `/api/config/*`, `/api/health/*`, `/api/indexes/*`, `/api/queries/*`) permanecen intactos.
+
+
 
 

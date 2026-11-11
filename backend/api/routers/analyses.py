@@ -15,7 +15,12 @@ from fastapi import APIRouter, File, Form, HTTPException, UploadFile, status
 from starlette.concurrency import run_in_threadpool
 
 from api.schemas import AnalysisCreateResponse, AnalysisFileSummary
-from services.sandbox_runner import SandboxExecutionError, execute_in_sandbox
+from services.sandbox_runner import (
+    SandboxExecutionError,
+    connect_sandbox_db,
+    execute_in_sandbox,
+)
+from services.scan_service import run_full_scan
 from services.sql_validator import SqlValidationError, validate_scripts
 
 router = APIRouter(prefix="/api/analyses", tags=["Análisis"])
@@ -77,6 +82,15 @@ def _parse_execution_order(order_raw: str | None, file_count: int) -> list[int]:
         )
 
     return parsed
+
+
+def _scan_sandbox(sandbox_db_name: str):
+    """Ejecuta todos los detectores aplicables exclusivamente sobre el sandbox recién creado."""
+    sandbox_conn = connect_sandbox_db(sandbox_db_name)
+    try:
+        return run_full_scan(sandbox_conn, is_sandbox=True)
+    finally:
+        sandbox_conn.close()
 
 
 async def _read_and_validate_file(upload: UploadFile, current_total: int) -> dict:
@@ -185,6 +199,8 @@ async def create_analysis(
                 err_status = status.HTTP_422_UNPROCESSABLE_ENTITY
             raise HTTPException(status_code=err_status, detail=exc.to_dict()) from exc
 
+        scan_report = await run_in_threadpool(_scan_sandbox, sandbox_res.sandbox_db_name)
+
         ordered_summary = [
             AnalysisFileSummary(
                 order=position,
@@ -196,17 +212,18 @@ async def create_analysis(
             for position, entry in enumerate(ordered_entries, start=1)
         ]
 
-        # shortcut: análisis ejecutado en sandbox sin persistencia en app_db ni detectores aún; completar en RF-01.5/RF-02.
+        # shortcut: análisis ejecutado y auditado en sandbox sin persistencia en app_db aún; completar en RF-01.7/RF-02.
         return AnalysisCreateResponse(
             id=str(uuid4()),
-            status="ejecutado",
-            message="Scripts SQL validados y ejecutados correctamente en sandbox aislado.",
+            status="completado",
+            message="Scripts SQL validados, ejecutados y auditados correctamente en sandbox aislado.",
             file_count=len(ordered_summary),
             total_size_bytes=total_size,
             sandbox_db_name=sandbox_res.sandbox_db_name,
             executed_statements=sandbox_res.executed_statements,
             execution_time_ms=sandbox_res.execution_time_ms,
             files=ordered_summary,
+            scan=scan_report,
             created_at=datetime.now(timezone.utc),
         )
     finally:

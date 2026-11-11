@@ -70,8 +70,18 @@ def check_partitioning_candidates(conn):
 
     try:
         with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
-            # Creamos el schema e instalamos la extensión
-            cur.execute(setup_query)
+            # Instalar pg_partman solo si está disponible y la sesión tiene permisos
+            cur.execute("SELECT EXISTS(SELECT 1 FROM pg_extension WHERE extname = 'pg_partman') AS installed;")
+            if not cur.fetchone()['installed']:
+                try:
+                    if not conn.autocommit:
+                        cur.execute("SAVEPOINT sp_pg_partman;")
+                    cur.execute(setup_query)
+                    if not conn.autocommit:
+                        cur.execute("RELEASE SAVEPOINT sp_pg_partman;")
+                except psycopg2.Error:
+                    if not conn.autocommit:
+                        cur.execute("ROLLBACK TO SAVEPOINT sp_pg_partman;")
 
             # Query principal
             cur.execute(query)

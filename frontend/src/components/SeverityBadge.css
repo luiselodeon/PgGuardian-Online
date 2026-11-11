@@ -33,3 +33,9 @@
   color: var(--severity-ok);
   border: 1px solid rgba(16, 185, 129, 0.2);
 }
+
+.severity--na {
+  background: rgba(139, 154, 178, 0.12);
+  color: var(--text-secondary);
+  border: 1px solid rgba(139, 154, 178, 0.25);
+}

@@ -1,3 +1,4 @@
+from datetime import datetime, timezone
 import io
 import unittest
 from unittest.mock import patch
@@ -9,6 +10,7 @@ from api.routers.analyses import (
     MAX_TOTAL_SIZE_BYTES,
     create_analysis,
 )
+from api.schemas import FullScanResponse
 from services.sandbox_runner import SandboxExecutionError, SandboxResult
 
 
@@ -26,22 +28,40 @@ def _fake_sandbox_result(parsed_scripts):
     )
 
 
+def _fake_scan_report(_sandbox_db_name):
+    return FullScanResponse(
+        health_score=85,
+        total_findings=1,
+        categories={},
+        executed_at=datetime.now(timezone.utc),
+        is_sandbox=True,
+        evaluated_detectors=13,
+        not_applicable_detectors=9,
+    )
+
+
 class AnalysesEndpointTests(unittest.IsolatedAsyncioTestCase):
     async def test_valid_single_sql_file(self):
-        with patch("api.routers.analyses.execute_in_sandbox", side_effect=_fake_sandbox_result) as mock_exec:
+        with (
+            patch("api.routers.analyses.execute_in_sandbox", side_effect=_fake_sandbox_result) as mock_exec,
+            patch("api.routers.analyses._scan_sandbox", side_effect=_fake_scan_report) as mock_scan,
+        ):
             res = await create_analysis(
                 files=[_upload("01_schema.sql", "-- Esquema con acentos áéíóúñ\nCREATE TABLE t(id int);\n".encode("utf-8"))],
                 order=None,
             )
-        self.assertEqual(res.status, "ejecutado")
+        self.assertEqual(res.status, "completado")
         self.assertEqual(res.file_count, 1)
         self.assertEqual(res.sandbox_db_name, "sandbox_test1234567890")
         self.assertEqual(res.executed_statements, 1)
+        self.assertEqual(res.scan.health_score, 85)
+        self.assertTrue(res.scan.is_sandbox)
         self.assertEqual(res.files[0].order, 1)
         self.assertEqual(res.files[0].filename, "01_schema.sql")
         self.assertEqual(res.files[0].encoding, "utf-8")
         self.assertEqual(res.files[0].line_count, 2)
         mock_exec.assert_called_once()
+        mock_scan.assert_called_once_with("sandbox_test1234567890")
 
     async def test_valid_reordered_multiple_files(self):
         files = [
@@ -49,7 +69,10 @@ class AnalysesEndpointTests(unittest.IsolatedAsyncioTestCase):
             _upload("03_idx.sql", b"CREATE INDEX idx_t ON t(id);"),
             _upload("01_schema.sql", b"CREATE TABLE t(id int);"),
         ]
-        with patch("api.routers.analyses.execute_in_sandbox", side_effect=_fake_sandbox_result) as mock_exec:
+        with (
+            patch("api.routers.analyses.execute_in_sandbox", side_effect=_fake_sandbox_result) as mock_exec,
+            patch("api.routers.analyses._scan_sandbox", side_effect=_fake_scan_report),
+        ):
             res = await create_analysis(files=files, order="[2, 0, 1]")
         self.assertEqual(res.file_count, 3)
         self.assertEqual(res.executed_statements, 3)

@@ -26,6 +26,9 @@ class FullScanResponse(BaseModel):
     total_findings: int
     categories: dict[str, Any]      # Resultados agrupados por categoría
     executed_at: datetime
+    is_sandbox: bool = False
+    evaluated_detectors: int = 22
+    not_applicable_detectors: int = 0
 
 
 class AnalysisFileSummary(BaseModel):
@@ -48,5 +51,6 @@ class AnalysisCreateResponse(BaseModel):
     executed_statements: int
     execution_time_ms: int
     files: list[AnalysisFileSummary]
+    scan: FullScanResponse
     created_at: datetime
 
