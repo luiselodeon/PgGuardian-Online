@@ -24,6 +24,7 @@ from api.database import get_connection
 from api.schemas import DetectorResponse, FullScanResponse
 
 # Importar routers
+from api.routers import analyses as analyses_router
 from api.routers import bloat as bloat_router
 from api.routers import config as config_router
 from api.routers import health as health_router
@@ -59,6 +60,7 @@ app.add_middleware(
 )
 
 # Registrar routers
+app.include_router(analyses_router.router)
 app.include_router(bloat_router.router)
 app.include_router(config_router.router)
 app.include_router(health_router.router)

@@ -5,6 +5,7 @@ pages y api, fueron hechos con ayuda de Inteligencia Artificial.
 import { useState, useEffect, useCallback } from 'react'
 import { Routes, Route } from 'react-router-dom'
 import Sidebar from './components/Sidebar'
+import NewAnalysisModal from './components/NewAnalysisModal'
 import Overview from './pages/Overview'
 import BloatPage from './pages/BloatPage'
 import ConfigPage from './pages/ConfigPage'
@@ -22,6 +23,7 @@ export default function App() {
   const [lastScan, setLastScan] = useState(null)
   const [error, setError] = useState(null)
   const [autoRefresh, setAutoRefresh] = useState(true)
+  const [isNewAnalysisOpen, setIsNewAnalysisOpen] = useState(false)
 
   const runScan = useCallback(async () => {
     setIsLoading(true)
@@ -75,6 +77,13 @@ export default function App() {
               <span className="toggle-label">Auto-refresh (30s)</span>
             </label>
             <button
+              type="button"
+              className="new-analysis-button"
+              onClick={() => setIsNewAnalysisOpen(true)}
+            >
+              Nuevo análisis
+            </button>
+            <button
               className={`scan-button ${isLoading ? 'scan-button--loading' : ''}`}
               onClick={runScan}
               disabled={isLoading}
@@ -103,6 +112,10 @@ export default function App() {
           </Routes>
         </div>
       </main>
+
+      {isNewAnalysisOpen && (
+        <NewAnalysisModal onClose={() => setIsNewAnalysisOpen(false)} />
+      )}
     </div>
   )
 }

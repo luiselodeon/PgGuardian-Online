@@ -478,3 +478,47 @@ Assumed expected load: **1 to 5 concurrent administrators running diagnostic sca
 - **Lean Potential:** ~180 lines of duplicated code (repetitive `_serialize` declarations and duplicate config detectors) and 1 unused dependency can be eliminated immediately.
 - **Verification Note:** All 18 benchmark issues (H01–H18) have corresponding detection logic mapped, but generic resilience requires removing hardcoded filters (`usename = 'tienda_user'`) prior to testing against unexpected database environments.
 
+---
+
+## RF-01.1 y RF-01.2 - Registro de Cambios y Decisiones Técnicas
+
+### 1. Archivos Creados y Modificados
+
+#### Backend (FastAPI)
+- **`backend/requirements.txt`** *(modificado)*: Se agregó `python-multipart==0.0.20`, requerido por FastAPI/Starlette para procesar peticiones `multipart/form-data` con `UploadFile` y `Form`.
+- **`backend/api/schemas.py`** *(modificado)*: Se añadieron los modelos Pydantic `AnalysisFileSummary` y `AnalysisCreateResponse` para tipar la respuesta de `POST /api/analyses`.
+- **`backend/api/routers/analyses.py`** *(creado)*: Nuevo router con prefijo `/api/analyses` y endpoint `POST /api/analyses`, incluyendo las funciones de validación `_parse_execution_order` y `_read_and_validate_file`.
+- **`backend/api/main.py`** *(modificado)*: Se importó y montó `analyses_router.router` dentro de la aplicación FastAPI sin alterar los detectores ni endpoints existentes de TiendaDB.
+- **`backend/tests/test_analyses.py`** *(creado)*: Suite de pruebas unitarias con `unittest` (`IsolatedAsyncioTestCase`) que verifica carga válida, reordenamiento, rechazo por cantidad, extensión inválida, UTF-8 inválido, límites de peso (10 MB / 25 MB) y parámetro `order` malformado.
+
+#### Frontend (React 19 + Vite)
+- **`frontend/src/api/pgguardian.js`** *(modificado)*: Se agregó la función `createAnalysis(files, order)` que envía `FormData` vía `POST ${API_BASE}/analyses` y propaga el campo `detail` de errores HTTP en español.
+- **`frontend/src/components/NewAnalysisModal.jsx`** *(creado)*: Modal accesible con selector múltiple y drag-and-drop para archivos `.sql`, validación en cliente, lista reordenable (botones `Subir`/`Bajar` y arrastre de filas) y vista de resumen tras recibir `201 Created`.
+- **`frontend/src/components/NewAnalysisModal.css`** *(creado)*: Estilos del modal, dropzone, cola ordenada y tabla de resultados usando las variables de diseño existentes en `frontend/src/index.css`.
+- **`frontend/src/App.jsx`** *(modificado)*: Se incorporó el botón **«Nuevo análisis»** en la barra superior (`.top-bar-actions`) y el montaje condicional de `NewAnalysisModal`.
+- **`frontend/src/App.css`** *(modificado)*: Se agregó la clase `.new-analysis-button` alineada con la paleta y jerarquía visual de `.scan-button`.
+
+### 2. Decisiones Técnicas y Alineación Arquitectónica
+- **Desacoplamiento de `app_db` y `sandbox_db` (alcance RF-01.1 / RF-01.2):** Dado que la creación de tablas en `app_db` (RF-02) y la ejecución aislada en `sandbox_db` (RF-01.4) pertenecen a incrementos separados, `POST /api/analyses` valida los scripts en memoria y retorna `201 Created` con un identificador UUID temporal, estado `"validado"` y el resumen ordenado de los archivos, manteniendo intacta la compatibilidad con TiendaDB (RNF-05) y sin introducir dependencias de base de datos ni `pglast` (RF-01.3).
+- **Lectura por bloques (*streaming*) en FastAPI:** `_read_and_validate_file` lee cada `UploadFile` en fragmentos de 1 MB (`READ_CHUNK_BYTES`) acumulando el tamaño individual y total en curso. Esto evita cargar en memoria archivos sobredimensionados antes de rechazarlos con `413` y asegura el cierre de descriptores en un bloque `finally`.
+- **Preservación explícita del orden secuencial:** El endpoint recibe el parámetro opcional `order` como `Form` (arreglo JSON de índices base 0, o enteros separados por coma) además del orden del arreglo `files`. El frontend envía los archivos ya reordenados junto con `order = [0, 1, ...]` y el backend reasigna posiciones consecutivas `1..N` en la respuesta.
+- **Validación dual Cliente + Servidor en React:** El modal valida extensión `.sql`, límite de 5 archivos, ≤ 10 MB individuales y ≤ 25 MB acumulados antes de enviar; la validación estricta de codificación UTF-8 se ejecuta en el backend (además de revalidar tamaño, cantidad, extensión y orden en el límite de confianza), permitiendo feedback inmediato en UI sin ocultar rechazos `422` por codificación inválida.
+- **Sin dependencias externas nuevas en Frontend:** El reordenamiento usa estado nativo de React con controles de teclado/clic (`↑` / `↓`) y eventos HTML5 Drag-and-Drop, evitando librerías externas innecesarias.
+
+### 3. Reglas de Validación Aplicadas
+1. **Cantidad de archivos:** Mínimo `1` (`MIN_FILES = 1`) y máximo `5` (`MAX_FILES = 5`) por análisis.
+2. **Extensión:** Solo archivos con sufijo `.sql` (insensible a mayúsculas, verificando nombre base no vacío mediante `PurePosixPath(filename).suffix.lower() == ".sql"` en backend y comprobación equivalente en cliente).
+3. **Tamaño de archivo e impacto acumulado:**
+   - Individual: máximo `10 * 1024 * 1024` bytes (10 MB) por archivo (`MAX_FILE_SIZE_BYTES`).
+   - Combinado: máximo `25 * 1024 * 1024` bytes (25 MB) sumando todos los archivos de la petición (`MAX_TOTAL_SIZE_BYTES`).
+4. **Codificación UTF-8 estricta:** Decodificación estricta `raw_bytes.decode("utf-8")` sin reemplazo ni tolerancia de bytes inválidos.
+5. **Orden de ejecución:** El parámetro opcional `order` debe representar una permutación exacta y sin duplicados ni booleanos de `0 .. len(files) - 1`.
+
+### 4. Manejo de Errores y Códigos HTTP
+Todos los mensajes de error se devuelven en español bajo el campo estándar `detail` de FastAPI (cumpliendo RNF-04):
+- **`201 Created`:** Todos los archivos cumplen las reglas; devuelve `AnalysisCreateResponse` con `id`, `status: "validado"`, `message`, `file_count`, `total_size_bytes`, `files` (ordenados `1..N` con nombre, tamaño en bytes, codificación `"utf-8"` y conteo de líneas) y `created_at`.
+- **`400 Bad Request`:** Menos de 1 archivo o archivo sin nombre válido, más de 5 archivos, o parámetro `order` malformado, con longitud incompatible o índices inválidos/duplicados.
+- **`413 Content Too Large`:** Cualquier archivo supera 10 MB o el peso acumulado supera 25 MB.
+- **`422 Unprocessable Entity`:** Extensión distinta de `.sql` o contenido con bytes no decodificables en UTF-8 estricto.
+
+

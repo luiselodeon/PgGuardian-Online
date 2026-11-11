@@ -26,6 +26,31 @@ export const healthCheck = () => fetchJSON('/health-check');
 // Full Scan
 export const fullScan = () => fetchJSON('/full-scan');
 
+// Nuevo análisis SQL (RF-01.1 y RF-01.2)
+export async function createAnalysis(files, order) {
+  const formData = new FormData();
+  files.forEach((file) => formData.append('files', file));
+  if (order) {
+    formData.append('order', JSON.stringify(order));
+  }
+
+  const res = await fetch(`${API_BASE}/analyses`, {
+    method: 'POST',
+    body: formData,
+  });
+
+  const data = await res.json().catch(() => null);
+  if (!res.ok) {
+    const detail = data?.detail;
+    throw new Error(
+      typeof detail === 'string'
+        ? detail
+        : `Error al validar el análisis (${res.status})`,
+    );
+  }
+  return data;
+}
+
 // Bloat
 export const getTableBloat = () => fetchJSON('/bloat/table-bloat');
 export const getDisabledAutovacuum = () => fetchJSON('/bloat/disabled-autovacuum');
