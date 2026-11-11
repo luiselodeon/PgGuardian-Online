@@ -18,8 +18,9 @@ function hasValidSqlExtension(filename) {
   return lastDot > 0 && clean.slice(lastDot).toLowerCase() === '.sql'
 }
 
-export default function NewAnalysisModal({ onClose }) {
+export default function NewAnalysisModal({ onClose, onCreated }) {
   const fileInputRef = useRef(null)
+  const [analysisName, setAnalysisName] = useState('')
   const [items, setItems] = useState([])
   const [error, setError] = useState(null)
   const [isDraggingFiles, setIsDraggingFiles] = useState(false)
@@ -130,8 +131,9 @@ export default function NewAnalysisModal({ onClose }) {
     try {
       const orderedFiles = items.map((entry) => entry.file)
       const orderIndices = orderedFiles.map((_, idx) => idx)
-      const data = await createAnalysis(orderedFiles, orderIndices)
+      const data = await createAnalysis(orderedFiles, orderIndices, analysisName)
       setResult(data)
+      if (onCreated) onCreated(data)
     } catch (err) {
       setError(err.message || 'No se pudieron validar los scripts SQL.')
     } finally {
@@ -140,6 +142,7 @@ export default function NewAnalysisModal({ onClose }) {
   }
 
   const handleReset = () => {
+    setAnalysisName('')
     setItems([])
     setError(null)
     setResult(null)
@@ -186,11 +189,11 @@ export default function NewAnalysisModal({ onClose }) {
               <div>
                 <strong>{result.message}</strong>
                 <div className="result-meta">
-                  ID: <code className="mono">{result.id}</code> · Estado: <strong>{result.status}</strong> ·{' '}
+                  Nombre: <strong>{result.name}</strong> · Estado: <strong>{result.status}</strong> ·{' '}
                   {result.file_count} archivo(s) · {formatBytes(result.total_size_bytes)}
                   {result.sandbox_db_name && (
                     <>
-                      {' '}· Sandbox: <code className="mono">{result.sandbox_db_name}</code> ·{' '}
+                      {' '}· Sandbox: <code className="mono">{result.sandbox_db_name}</code> ({result.sandbox_status}) ·{' '}
                       {result.executed_statements} sentencias ({result.execution_time_ms} ms)
                     </>
                   )}
@@ -241,6 +244,19 @@ export default function NewAnalysisModal({ onClose }) {
           </div>
         ) : (
           <form onSubmit={handleSubmit} className="modal-form">
+            <label className="field-group">
+              <span className="field-label">Nombre del análisis (opcional)</span>
+              <input
+                type="text"
+                className="field-input"
+                maxLength={200}
+                value={analysisName}
+                onChange={(e) => setAnalysisName(e.target.value)}
+                placeholder="Ej. Esquema tienda v1 (por defecto usa el primer .sql)"
+                disabled={isSubmitting}
+              />
+            </label>
+
             <div
               className={`dropzone ${isDraggingFiles ? 'dropzone--active' : ''}`}
               onDragOver={(e) => {

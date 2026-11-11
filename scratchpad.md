@@ -618,6 +618,41 @@ Cada uno de los 22 detectores ponderados posee su peso nominal en `_DETECTOR_WEI
 - `GET /api/full-scan` sigue operando con `Depends(get_connection)` (`is_sandbox=False`), ejecutando los 22 detectores y devolviendo el mismo contrato JSON (`health_score`, `total_findings`, `categories`, `executed_at`).
 - Los routers individuales existentes (`/api/bloat/*`, `/api/config/*`, `/api/health/*`, `/api/indexes/*`, `/api/queries/*`) permanecen intactos.
 
+---
+
+## RF-01.7 y RF-01.8 - Persistencia de Historial, Limpieza Sandbox y Control de Acceso
+
+### 1. Archivos Creados y Modificados
+- **`.env`** y **`docker-compose.yml`** *(modificados)*: Se añadió el servicio aislado `app_db` (`postgres:16`, contenedor `pgguardian_appdb`, volumen `pgguardian_app_data`, sin puertos públicos) junto con las variables `APP_DB_*` inyectadas en `api` (`depends_on: app_db`).
+- **`backend/services/analysis_store.py`** *(creado)*: Capa de acceso a `app_db` (`init_app_db_schema`, `insert_analysis`, `list_analyses_for_user`, `get_analysis_for_user`, `delete_analysis_for_user`, `find_expired_active_sandboxes`, `mark_sandbox_destroyed`).
+- **`backend/services/sandbox_cleanup.py`** *(creado)*: Recolector programado (`cleanup_expired_sandboxes`, `sandbox_cleanup_loop`) integrado al `lifespan` de FastAPI sin dependencias externas (Celery/Redis).
+- **`backend/services/sandbox_runner.py`** *(modificado)*: Se expuso `drop_sandbox_db(db_name)` para eliminar bases en `sandbox_db` con `DROP DATABASE IF EXISTS ... WITH (FORCE)`.
+- **`backend/api/auth.py`** *(creado)*: Dependencia `get_current_user_id` que exige identidad de usuario (`X-User-Id` o cookie `pgguardian_user`, respondiendo `401` si falta) lista para ser reemplazada por JWT/sesiones en RF-02.
+- **`backend/api/main.py`**, **`backend/api/schemas.py`** y **`backend/api/routers/analyses.py`** *(modificados)*: Se añadió el ciclo `lifespan` (esquema `app_db` + tarea periódica 24 h), campo opcional `name` en `POST /api/analyses`, y endpoints `GET /api/analyses`, `GET /api/analyses/{id}` y `DELETE /api/analyses/{id}`.
+- **`frontend/src/api/pgguardian.js`**, **`Sidebar.jsx` / `.css`**, **`NewAnalysisModal.jsx` / `.css`**, **`App.jsx`** y nueva vista **`frontend/src/pages/HistoryPage.jsx` / `.css`** *(creados/modificados)*: Campo de nombre en carga, ruta `/history` con tabla histórica (`nombre`, `fecha`, `health score`, `estado sandbox`, detalle y borrado) y selector temporal de sesión activa (`usuario_a`, `usuario_b`, `usuario_c`).
+- **`backend/tests/test_analyses_lifecycle.py`** *(creado)* y **`backend/tests/test_analyses.py`** *(actualizado)*: Cobertura unitaria de `401`, aislamiento `user_a` vs `user_b` con `404` (CA-03), lectura de reportes tras purga del sandbox y limpieza de sandboxes vencidos.
+
+### 2. Estrategia de Ciclo de Vida y Purga a las 24 Horas (RF-01.7)
+- Al completar `POST /api/analyses`, se registra `sandbox_status = 'active'` y `sandbox_expires_at = created_at + 24 horas`.
+- En el arranque (`lifespan` de FastAPI) y cada 300 segundos (`SANDBOX_CLEANUP_INTERVAL_SECONDS`), `sandbox_cleanup_loop` ejecuta `cleanup_expired_sandboxes()`:
+  1. Consulta en `app_db` las filas con `sandbox_status = 'active' AND sandbox_expires_at <= NOW()`.
+  2. Ejecuta `DROP DATABASE IF EXISTS "<sandbox_db_name>" WITH (FORCE)` en `sandbox_db` (cerrando conexiones activas).
+  3. Actualiza únicamente `sandbox_status = 'destroyed'` y `sandbox_destroyed_at = NOW()` en `app_db`, preservando íntegros `name`, `created_at`, `health_score`, `total_findings`, `files_json` y `scan_json`.
+- Al consultar `GET /api/analyses/{id}` después de las 24 h, el endpoint lee exclusivamente desde `app_db` sin intentar conectarse a `sandbox_db`, mostrando el reporte completo junto con el estado `"destroyed"`.
+- Al ejecutar `DELETE /api/analyses/{id}`, además de borrar el registro en `app_db`, si `sandbox_status == 'active'` se purga inmediatamente la base temporal en `sandbox_db`.
+
+### 3. Modelo Desacoplado en `app_db`
+Tabla `analyses` en `app_db`:
+- **Identidad y propiedad:** `id UUID PRIMARY KEY`, `user_id VARCHAR(128) NOT NULL`, `name VARCHAR(200) NOT NULL`, índice compuesto `(user_id, created_at DESC)`.
+- **Estado del ciclo sandbox (sin credenciales):** `sandbox_db_name VARCHAR(63)`, `sandbox_status VARCHAR(20)`, `sandbox_expires_at TIMESTAMPTZ`, `sandbox_destroyed_at TIMESTAMPTZ`, índice parcial `(sandbox_status, sandbox_expires_at) WHERE sandbox_status = 'active'`. Nunca se almacenan usuarios, contraseñas ni cadenas de conexión de `sandbox_db`.
+- **Snapshot permanente del reporte:** `status`, `message`, `file_count`, `total_size_bytes`, `files_json JSONB`, `executed_statements`, `execution_time_ms`, `health_score`, `total_findings`, `scan_json JSONB`, `created_at`.
+
+### 4. Autorización Multitenant y Respuestas `404` (RF-01.8 / CA-03)
+- Todos los endpoints `/api/analyses*` dependen de `get_current_user_id` (`401` si no hay sesión/cabecera válida).
+- `GET /api/analyses` filtra estrictamente con `WHERE user_id = %s`.
+- `GET /api/analyses/{id}` y `DELETE /api/analyses/{id}` validan formato UUID y ejecutan consultas con `WHERE id = %s AND user_id = %s`. Si el registro no existe, el UUID es inválido o pertenece a otro usuario, devuelven indistintamente `404 Not Found` (`{"detail": "Análisis no encontrado."}`), evitando enumeración de IDs o fuga de metadatos entre inquilinos.
+
+
 
 
 

@@ -11,13 +11,26 @@ import json
 from pathlib import PurePosixPath
 from uuid import uuid4
 
-from fastapi import APIRouter, File, Form, HTTPException, UploadFile, status
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
 from starlette.concurrency import run_in_threadpool
 
-from api.schemas import AnalysisCreateResponse, AnalysisFileSummary
+from api.auth import get_current_user_id
+from api.schemas import (
+    AnalysisCreateResponse,
+    AnalysisDeleteResponse,
+    AnalysisFileSummary,
+    AnalysisListResponse,
+)
+from services.analysis_store import (
+    delete_analysis_for_user,
+    get_analysis_for_user,
+    insert_analysis,
+    list_analyses_for_user,
+)
 from services.sandbox_runner import (
     SandboxExecutionError,
     connect_sandbox_db,
+    drop_sandbox_db,
     execute_in_sandbox,
 )
 from services.scan_service import run_full_scan
@@ -152,8 +165,13 @@ async def create_analysis(
         default=None,
         description="Arreglo JSON opcional con los índices base 0 que definen el orden de ejecución (ej. [1, 0]).",
     ),
+    name: str | None = Form(
+        default=None,
+        description="Nombre descriptivo opcional para el reporte histórico.",
+    ),
+    user_id: str = Depends(get_current_user_id),
 ):
-    """Valida hasta 5 scripts .sql en UTF-8 y devuelve el resumen ordenado en memoria."""
+    """Valida, ejecuta en sandbox, audita y persiste el reporte en app_db para su dueño."""
     try:
         if len(files) < MIN_FILES:
             raise HTTPException(
@@ -199,7 +217,14 @@ async def create_analysis(
                 err_status = status.HTTP_422_UNPROCESSABLE_ENTITY
             raise HTTPException(status_code=err_status, detail=exc.to_dict()) from exc
 
-        scan_report = await run_in_threadpool(_scan_sandbox, sandbox_res.sandbox_db_name)
+        try:
+            scan_report = await run_in_threadpool(_scan_sandbox, sandbox_res.sandbox_db_name)
+        except Exception as exc:
+            await run_in_threadpool(drop_sandbox_db, sandbox_res.sandbox_db_name)
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Error al ejecutar los detectores sobre el sandbox.",
+            ) from exc
 
         ordered_summary = [
             AnalysisFileSummary(
@@ -212,21 +237,82 @@ async def create_analysis(
             for position, entry in enumerate(ordered_entries, start=1)
         ]
 
-        # shortcut: análisis ejecutado y auditado en sandbox sin persistencia en app_db aún; completar en RF-01.7/RF-02.
-        return AnalysisCreateResponse(
-            id=str(uuid4()),
-            status="completado",
-            message="Scripts SQL validados, ejecutados y auditados correctamente en sandbox aislado.",
-            file_count=len(ordered_summary),
-            total_size_bytes=total_size,
-            sandbox_db_name=sandbox_res.sandbox_db_name,
-            executed_statements=sandbox_res.executed_statements,
-            execution_time_ms=sandbox_res.execution_time_ms,
-            files=ordered_summary,
-            scan=scan_report,
-            created_at=datetime.now(timezone.utc),
-        )
+        analysis_id = str(uuid4())
+        analysis_name = ((name or "").strip() or ordered_summary[0].filename)[:200]
+        created_at = datetime.now(timezone.utc)
+        files_payload = [item.model_dump() for item in ordered_summary]
+        scan_payload = scan_report.model_dump(mode="json")
+
+        try:
+            stored = await run_in_threadpool(
+                insert_analysis,
+                analysis_id=analysis_id,
+                user_id=user_id,
+                name=analysis_name,
+                status="completado",
+                message="Scripts SQL validados, ejecutados y auditados correctamente en sandbox aislado.",
+                file_count=len(ordered_summary),
+                total_size_bytes=total_size,
+                files=files_payload,
+                sandbox_db_name=sandbox_res.sandbox_db_name,
+                executed_statements=sandbox_res.executed_statements,
+                execution_time_ms=sandbox_res.execution_time_ms,
+                scan=scan_payload,
+                created_at=created_at,
+            )
+        except Exception as exc:
+            await run_in_threadpool(drop_sandbox_db, sandbox_res.sandbox_db_name)
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="No se pudo guardar el reporte del análisis en app_db.",
+            ) from exc
+
+        return AnalysisCreateResponse(**stored)
     finally:
         for upload in files:
             await upload.close()
+
+
+@router.get("", response_model=AnalysisListResponse)
+async def list_analyses(user_id: str = Depends(get_current_user_id)):
+    """Lista únicamente los análisis pertenecientes al usuario autenticado."""
+    rows = await run_in_threadpool(list_analyses_for_user, user_id)
+    return AnalysisListResponse(items=rows, total=len(rows))
+
+
+@router.get("/{analysis_id}", response_model=AnalysisCreateResponse)
+async def get_analysis_detail(
+    analysis_id: str,
+    user_id: str = Depends(get_current_user_id),
+):
+    """Obtiene el reporte completo desde app_db aunque el sandbox ya haya expirado."""
+    record = await run_in_threadpool(get_analysis_for_user, analysis_id, user_id)
+    if record is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Análisis no encontrado.",
+        )
+    return AnalysisCreateResponse(**record)
+
+
+@router.delete("/{analysis_id}", response_model=AnalysisDeleteResponse)
+async def delete_analysis(
+    analysis_id: str,
+    user_id: str = Depends(get_current_user_id),
+):
+    """Elimina un análisis propio y purga su base sandbox si sigue activa."""
+    deleted = await run_in_threadpool(delete_analysis_for_user, analysis_id, user_id)
+    if deleted is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Análisis no encontrado.",
+        )
+
+    if deleted["sandbox_status"] == "active":
+        await run_in_threadpool(drop_sandbox_db, deleted["sandbox_db_name"])
+
+    return AnalysisDeleteResponse(
+        id=deleted["id"],
+        message="Análisis eliminado correctamente.",
+    )
 

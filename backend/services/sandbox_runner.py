@@ -212,8 +212,8 @@ def _provision_sandbox_db(cfg: SandboxConfig, db_name: str) -> None:
             admin_conn.close()
 
 
-def _drop_sandbox_db(cfg: SandboxConfig, db_name: str) -> None:
-    """Elimina la base sandbox temporal tras un fallo para evitar residuos."""
+def _drop_sandbox_db(cfg: SandboxConfig, db_name: str) -> bool:
+    """Elimina la base sandbox temporal cerrando conexiones activas."""
     admin_conn = None
     try:
         admin_conn = _connect(
@@ -228,11 +228,19 @@ def _drop_sandbox_db(cfg: SandboxConfig, db_name: str) -> None:
                     sql.Identifier(db_name)
                 )
             )
+        return True
     except Exception:
-        pass
+        return False
     finally:
         if admin_conn:
             admin_conn.close()
+
+
+def drop_sandbox_db(db_name: str) -> bool:
+    """Elimina una base sandbox expirada o borrada manualmente usando SANDBOX_DB_*."""
+    if not db_name or not db_name.startswith("sandbox_"):
+        return False
+    return _drop_sandbox_db(_get_sandbox_config(), db_name)
 
 
 def _translate_pg_error(pgcode: str | None, primary_msg: str) -> str:

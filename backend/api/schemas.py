@@ -41,16 +41,52 @@ class AnalysisFileSummary(BaseModel):
 
 
 class AnalysisCreateResponse(BaseModel):
-    """Respuesta al validar y ejecutar en sandbox un nuevo análisis SQL."""
+    """Respuesta al validar, ejecutar en sandbox y registrar un análisis."""
     id: str
+    user_id: str
+    name: str
     status: str
     message: str
     file_count: int
     total_size_bytes: int
     sandbox_db_name: str
+    sandbox_status: str
+    sandbox_expires_at: datetime
+    sandbox_destroyed_at: datetime | None = None
     executed_statements: int
     execution_time_ms: int
     files: list[AnalysisFileSummary]
     scan: FullScanResponse
     created_at: datetime
+
+
+class AnalysisSummaryItem(BaseModel):
+    """Resumen de un análisis para el listado del historial."""
+    id: str
+    user_id: str
+    name: str
+    status: str
+    file_count: int
+    total_size_bytes: int
+    sandbox_db_name: str
+    sandbox_status: str
+    sandbox_expires_at: datetime
+    sandbox_destroyed_at: datetime | None = None
+    executed_statements: int
+    execution_time_ms: int
+    health_score: int
+    total_findings: int
+    created_at: datetime
+
+
+class AnalysisListResponse(BaseModel):
+    """Listado de análisis históricos filtrados por el usuario autenticado."""
+    items: list[AnalysisSummaryItem]
+    total: int
+
+
+class AnalysisDeleteResponse(BaseModel):
+    """Respuesta tras eliminar un análisis propio."""
+    id: str
+    message: str
 

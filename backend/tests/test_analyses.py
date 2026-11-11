@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 import io
 import unittest
 from unittest.mock import patch
@@ -40,17 +40,45 @@ def _fake_scan_report(_sandbox_db_name):
     )
 
 
+def _fake_insert_analysis(**kwargs):
+    created = kwargs["created_at"]
+    return {
+        "id": kwargs["analysis_id"],
+        "user_id": kwargs["user_id"],
+        "name": kwargs["name"],
+        "status": kwargs["status"],
+        "message": kwargs["message"],
+        "file_count": kwargs["file_count"],
+        "total_size_bytes": kwargs["total_size_bytes"],
+        "files": kwargs["files"],
+        "sandbox_db_name": kwargs["sandbox_db_name"],
+        "sandbox_status": "active",
+        "sandbox_expires_at": created + timedelta(hours=24),
+        "sandbox_destroyed_at": None,
+        "executed_statements": kwargs["executed_statements"],
+        "execution_time_ms": kwargs["execution_time_ms"],
+        "scan": kwargs["scan"],
+        "created_at": created,
+    }
+
+
 class AnalysesEndpointTests(unittest.IsolatedAsyncioTestCase):
     async def test_valid_single_sql_file(self):
         with (
             patch("api.routers.analyses.execute_in_sandbox", side_effect=_fake_sandbox_result) as mock_exec,
             patch("api.routers.analyses._scan_sandbox", side_effect=_fake_scan_report) as mock_scan,
+            patch("api.routers.analyses.insert_analysis", side_effect=_fake_insert_analysis) as mock_store,
         ):
             res = await create_analysis(
                 files=[_upload("01_schema.sql", "-- Esquema con acentos áéíóúñ\nCREATE TABLE t(id int);\n".encode("utf-8"))],
                 order=None,
+                name="Mi esquema",
+                user_id="user_a",
             )
         self.assertEqual(res.status, "completado")
+        self.assertEqual(res.user_id, "user_a")
+        self.assertEqual(res.name, "Mi esquema")
+        self.assertEqual(res.sandbox_status, "active")
         self.assertEqual(res.file_count, 1)
         self.assertEqual(res.sandbox_db_name, "sandbox_test1234567890")
         self.assertEqual(res.executed_statements, 1)
@@ -62,6 +90,7 @@ class AnalysesEndpointTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(res.files[0].line_count, 2)
         mock_exec.assert_called_once()
         mock_scan.assert_called_once_with("sandbox_test1234567890")
+        mock_store.assert_called_once()
 
     async def test_valid_reordered_multiple_files(self):
         files = [
@@ -72,8 +101,10 @@ class AnalysesEndpointTests(unittest.IsolatedAsyncioTestCase):
         with (
             patch("api.routers.analyses.execute_in_sandbox", side_effect=_fake_sandbox_result) as mock_exec,
             patch("api.routers.analyses._scan_sandbox", side_effect=_fake_scan_report),
+            patch("api.routers.analyses.insert_analysis", side_effect=_fake_insert_analysis),
         ):
-            res = await create_analysis(files=files, order="[2, 0, 1]")
+            res = await create_analysis(files=files, order="[2, 0, 1]", name=None, user_id="user_a")
+        self.assertEqual(res.name, "01_schema.sql")
         self.assertEqual(res.file_count, 3)
         self.assertEqual(res.executed_statements, 3)
         self.assertEqual(
@@ -89,6 +120,8 @@ class AnalysesEndpointTests(unittest.IsolatedAsyncioTestCase):
                 await create_analysis(
                     files=[_upload("evil.sql", b"CREATE TABLE t(id int);\nALTER SYSTEM SET work_mem = '1GB';")],
                     order=None,
+                    name=None,
+                    user_id="user_a",
                 )
         self.assertEqual(ctx.exception.status_code, 422)
         self.assertEqual(ctx.exception.detail["code"], "SQL_AST_BLOCKED")
@@ -108,37 +141,57 @@ class AnalysesEndpointTests(unittest.IsolatedAsyncioTestCase):
         )
         with patch("api.routers.analyses.execute_in_sandbox", side_effect=err):
             with self.assertRaises(HTTPException) as ctx:
-                await create_analysis(files=[_upload("broken.sql", b"SELECT 1;")], order=None)
+                await create_analysis(
+                    files=[_upload("broken.sql", b"SELECT 1;")],
+                    order=None,
+                    name=None,
+                    user_id="user_a",
+                )
         self.assertEqual(ctx.exception.status_code, 422)
         self.assertEqual(ctx.exception.detail["filename"], "broken.sql")
         self.assertEqual(ctx.exception.detail["line"], 3)
 
     async def test_rejects_empty_file_list(self):
         with self.assertRaises(HTTPException) as ctx:
-            await create_analysis(files=[], order=None)
+            await create_analysis(files=[], order=None, name=None, user_id="user_a")
         self.assertEqual(ctx.exception.status_code, 400)
 
     async def test_rejects_more_than_five_files(self):
         files = [_upload(f"s{i}.sql", b"SELECT 1;") for i in range(6)]
         with self.assertRaises(HTTPException) as ctx:
-            await create_analysis(files=files, order=None)
+            await create_analysis(files=files, order=None, name=None, user_id="user_a")
         self.assertEqual(ctx.exception.status_code, 400)
 
     async def test_rejects_invalid_extensions(self):
         for bad_name in ("script.txt", "schema.sql.bak", ".sql"):
             with self.assertRaises(HTTPException) as ctx:
-                await create_analysis(files=[_upload(bad_name, b"SELECT 1;")], order=None)
+                await create_analysis(
+                    files=[_upload(bad_name, b"SELECT 1;")],
+                    order=None,
+                    name=None,
+                    user_id="user_a",
+                )
             self.assertEqual(ctx.exception.status_code, 422)
 
     async def test_rejects_invalid_utf8(self):
         with self.assertRaises(HTTPException) as ctx:
-            await create_analysis(files=[_upload("latin1.sql", b"SELECT '\xff\xfe';")], order=None)
+            await create_analysis(
+                files=[_upload("latin1.sql", b"SELECT '\xff\xfe';")],
+                order=None,
+                name=None,
+                user_id="user_a",
+            )
         self.assertEqual(ctx.exception.status_code, 422)
 
     async def test_rejects_single_file_over_10mb(self):
         oversized = b"a" * (MAX_FILE_SIZE_BYTES + 1)
         with self.assertRaises(HTTPException) as ctx:
-            await create_analysis(files=[_upload("big.sql", oversized)], order=None)
+            await create_analysis(
+                files=[_upload("big.sql", oversized)],
+                order=None,
+                name=None,
+                user_id="user_a",
+            )
         self.assertEqual(ctx.exception.status_code, 413)
 
     async def test_rejects_combined_size_over_25mb(self):
@@ -146,14 +199,14 @@ class AnalysesEndpointTests(unittest.IsolatedAsyncioTestCase):
         files = [_upload(f"p{i}.sql", nine_mb) for i in range(3)]  # 27 MB total
         self.assertGreater(len(files) * len(nine_mb), MAX_TOTAL_SIZE_BYTES)
         with self.assertRaises(HTTPException) as ctx:
-            await create_analysis(files=files, order=None)
+            await create_analysis(files=files, order=None, name=None, user_id="user_a")
         self.assertEqual(ctx.exception.status_code, 413)
 
     async def test_rejects_invalid_order_parameter(self):
         files = [_upload("a.sql", b"SELECT 1;"), _upload("b.sql", b"SELECT 2;")]
         for bad_order in ("not-json", "[0]", "[0, 0]", "[0, 2]", "[true, false]"):
             with self.assertRaises(HTTPException) as ctx:
-                await create_analysis(files=files, order=bad_order)
+                await create_analysis(files=files, order=bad_order, name=None, user_id="user_a")
             self.assertEqual(ctx.exception.status_code, 400)
 
 

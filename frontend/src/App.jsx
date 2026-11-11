@@ -7,12 +7,13 @@ import { Routes, Route } from 'react-router-dom'
 import Sidebar from './components/Sidebar'
 import NewAnalysisModal from './components/NewAnalysisModal'
 import Overview from './pages/Overview'
+import HistoryPage from './pages/HistoryPage'
 import BloatPage from './pages/BloatPage'
 import ConfigPage from './pages/ConfigPage'
 import HealthPage from './pages/HealthPage'
 import IndexesPage from './pages/IndexesPage'
 import QueriesPage from './pages/QueriesPage'
-import { fullScan } from './api/pgguardian'
+import { fullScan, getCurrentUserId, setCurrentUserId } from './api/pgguardian'
 import './App.css'
 
 const POLL_INTERVAL = 30000 // 30 seconds
@@ -24,6 +25,13 @@ export default function App() {
   const [error, setError] = useState(null)
   const [autoRefresh, setAutoRefresh] = useState(true)
   const [isNewAnalysisOpen, setIsNewAnalysisOpen] = useState(false)
+  const [currentUser, setCurrentUser] = useState(() => getCurrentUserId())
+  const [historyRefreshKey, setHistoryRefreshKey] = useState(0)
+
+  const handleUserChange = (nextUser) => {
+    const saved = setCurrentUserId(nextUser)
+    setCurrentUser(saved)
+  }
 
   const runScan = useCallback(async () => {
     setIsLoading(true)
@@ -54,7 +62,7 @@ export default function App() {
 
   return (
     <div className="app-layout">
-      <Sidebar scanData={scanData} />
+      <Sidebar scanData={scanData} currentUser={currentUser} onUserChange={handleUserChange} />
 
       <main className="main-content">
         {/* Top bar */}
@@ -104,6 +112,7 @@ export default function App() {
         <div className="page-wrapper">
           <Routes>
             <Route path="/" element={<Overview scanData={scanData} isLoading={isLoading} lastScan={lastScan} />} />
+            <Route path="/history" element={<HistoryPage currentUser={currentUser} refreshKey={historyRefreshKey} />} />
             <Route path="/bloat" element={<BloatPage scanData={scanData} isLoading={isLoading} />} />
             <Route path="/config" element={<ConfigPage scanData={scanData} isLoading={isLoading} />} />
             <Route path="/health" element={<HealthPage scanData={scanData} isLoading={isLoading} />} />
@@ -114,7 +123,10 @@ export default function App() {
       </main>
 
       {isNewAnalysisOpen && (
-        <NewAnalysisModal onClose={() => setIsNewAnalysisOpen(false)} />
+        <NewAnalysisModal
+          onClose={() => setIsNewAnalysisOpen(false)}
+          onCreated={() => setHistoryRefreshKey((k) => k + 1)}
+        />
       )}
     </div>
   )

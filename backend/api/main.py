@@ -14,13 +14,18 @@ Nota: Todos los routers bajo la carpeta de /routers, así como los archivos
 bajo la carpeta de /api fueron normalizados con ayuda de la Inteligencia Artificial.
 """
 
+import asyncio
+from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 
 from fastapi import FastAPI, Depends
 from fastapi.middleware.cors import CORSMiddleware
+from starlette.concurrency import run_in_threadpool
 
 from api.database import get_connection
 from api.schemas import FullScanResponse
+from services.analysis_store import init_app_db_schema
+from services.sandbox_cleanup import sandbox_cleanup_loop
 from services.scan_service import run_full_scan
 
 # Importar routers
@@ -32,10 +37,24 @@ from api.routers import indexes as indexes_router
 from api.routers import queries as queries_router
 
 
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Inicializa el esquema de app_db y el ciclo de limpieza sandbox (24 h)."""
+    await run_in_threadpool(init_app_db_schema)
+    stop_event = asyncio.Event()
+    cleanup_task = asyncio.create_task(sandbox_cleanup_loop(stop_event))
+    try:
+        yield
+    finally:
+        stop_event.set()
+        await cleanup_task
+
+
 app = FastAPI(
     title="PgGuardian API",
     description="API de diagnóstico de salud para PostgreSQL",
     version="1.0.0",
+    lifespan=lifespan,
 )
 
 origins = [
