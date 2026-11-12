@@ -34,12 +34,12 @@ export default function HealthPage({ scanData, isLoading }) {
           data={partitionData}
           columns={[
             { key: 'table_name', label: 'Tabla' },
-            { key: 'schemaname', label: 'Schema' },
+            { key: 'schemaname', label: 'Esquema' },
             { key: 'total_table_size', label: 'Tamaño' },
             { key: 'size_mb', label: 'MB' },
-            { key: 'total_inserts_history', label: 'Inserts Totales' },
-            { key: 'total_deletes_history', label: 'Deletes Totales' },
-            { key: 'delete_ratio_pct', label: 'Ratio Delete %' },
+            { key: 'total_inserts_history', label: 'Inserciones Totales' },
+            { key: 'total_deletes_history', label: 'Eliminaciones Totales' },
+            { key: 'delete_ratio_pct', label: 'Proporción Eliminación %' },
             { key: 'evidence', label: 'Evidencia' },
             { key: 'sql_combined', label: 'Recomendación SQL' },
           ]}
@@ -48,7 +48,7 @@ export default function HealthPage({ scanData, isLoading }) {
 
         <section className="detector-section">
           <h3 className="detector-section-title">
-            Sesiones Idle In Transaction
+            Sesiones Inactivas en Transacción
             {idleData.length > 0 && (
               <span className="detector-section-badge detector-section-badge--warn">
                 {idleData.length} sesión{idleData.length !== 1 ? 'es' : ''} activa{idleData.length !== 1 ? 's' : ''}
@@ -56,7 +56,7 @@ export default function HealthPage({ scanData, isLoading }) {
             )}
           </h3>
           {idleData.length === 0 ? (
-            <p className="finding-empty">No se detectaron sesiones idle in transaction</p>
+            <p className="finding-empty">No se detectaron sesiones inactivas en transacción</p>
           ) : (
             <FindingList data={idleData} />
           )}

@@ -290,7 +290,7 @@ export default function App() {
                         checked={autoRefresh}
                         onChange={(e) => setAutoRefresh(e.target.checked)}
                       />
-                      <span className="toggle-label">Auto-refresh (30s)</span>
+                      <span className="toggle-label">Actualización automática (30 s)</span>
                     </label>
                     <button
                       type="button"

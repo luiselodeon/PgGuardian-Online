@@ -24,6 +24,9 @@ services:
       PGDATA: /var/lib/postgresql/data/pgdata
     ports:
       - "${DB_PORT}:5432"
+    networks:
+      - public_net
+      - tienda_net
     volumes:
       # Init scripts run in alphabetical order on first start
       - ./init:/docker-entrypoint-initdb.d:ro
@@ -52,6 +55,8 @@ services:
     environment:
       PGHOST: db
       PGPORT: 5432
+    networks:
+      - tienda_net
 
   api: 
     build:
@@ -80,6 +85,11 @@ services:
       SANDBOX_DB_EXEC_USER: ${SANDBOX_DB_EXEC_USER}
       SANDBOX_DB_EXEC_PASSWORD: ${SANDBOX_DB_EXEC_PASSWORD}
       JWT_SECRET: ${JWT_SECRET}
+    networks:
+      - public_net
+      - tienda_net
+      - app_net
+      - sandbox_net
     depends_on:
       db:
         condition: service_healthy
@@ -98,6 +108,8 @@ services:
       POSTGRES_PASSWORD: ${APP_DB_PASSWORD}
     volumes:
       - app_data:/var/lib/postgresql/data
+    networks:
+      - app_net
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${APP_DB_USER} -d ${APP_DB_NAME}"]
       interval: 10s
@@ -114,6 +126,8 @@ services:
       POSTGRES_PASSWORD: ${SANDBOX_DB_ADMIN_PASSWORD}
     volumes:
       - sandbox_data:/var/lib/postgresql/data
+    networks:
+      - sandbox_net
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${SANDBOX_DB_ADMIN_USER} -d ${SANDBOX_DB_NAME}"]
       interval: 10s
@@ -128,9 +142,24 @@ services:
     restart: unless-stopped
     ports:
       - "5173:5173"
+    networks:
+      - public_net
     depends_on:
       - api
     
+networks:
+  public_net:
+    driver: bridge
+  tienda_net:
+    driver: bridge
+    internal: true
+  app_net:
+    driver: bridge
+    internal: true
+  sandbox_net:
+    driver: bridge
+    internal: true
+
 volumes:
   tienda_data:
     name: tiendadb_data

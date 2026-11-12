@@ -460,7 +460,7 @@ def run_full_scan(conn, is_sandbox: bool = False) -> FullScanResponse:
 
     # Bloat
     table_bloat_entry, table_bloat = _run_or_na(
-        "table_bloat", "Bloat en Tablas", check_table_bloat, conn,
+        "table_bloat", "Fragmentación (Bloat) en Tablas", check_table_bloat, conn,
         category_label="Bloat y Mantenimiento", is_sandbox=is_sandbox,
     )
     disabled_autovacuum_entry, disabled_autovacuum = _run_or_na(
@@ -468,7 +468,7 @@ def run_full_scan(conn, is_sandbox: bool = False) -> FullScanResponse:
         category_label="Bloat y Mantenimiento", is_sandbox=is_sandbox,
     )
     dead_tuples_entry, dead_tuples = _run_or_na(
-        "dead_tuples", "Dead Tuples", check_dead_tuples, conn,
+        "dead_tuples", "Tuplas Muertas", check_dead_tuples, conn,
         category_label="Bloat y Mantenimiento", is_sandbox=is_sandbox,
     )
 
@@ -504,7 +504,7 @@ def run_full_scan(conn, is_sandbox: bool = False) -> FullScanResponse:
     )
     idle_entry, idle_in_transaction = _run_or_na(
         "idle_in_transaction",
-        "Idle In Transaction",
+        "Sesiones Inactivas en Transacción",
         check_idle_in_transaction,
         conn,
         category_label="Salud General",
@@ -546,7 +546,7 @@ def run_full_scan(conn, is_sandbox: bool = False) -> FullScanResponse:
     )
     covering_entry, covering_candidates = _run_or_na(
         "covering_candidates",
-        "Candidatos a Covering Index",
+        "Candidatos a Índice Cubriente",
         check_covering_index_candidates,
         conn,
         category_label="Auditoría de Índices",
@@ -562,7 +562,7 @@ def run_full_scan(conn, is_sandbox: bool = False) -> FullScanResponse:
     )
     wildcard_entry, wildcard_searches = _run_or_na(
         "wildcard_searches",
-        "Búsquedas con Wildcard",
+        "Búsquedas con Comodín Inicial",
         check_leading_wildcard_searches,
         conn,
         category_label="Auditoría de Índices",
@@ -573,28 +573,28 @@ def run_full_scan(conn, is_sandbox: bool = False) -> FullScanResponse:
     pg_stat_enabled = check_pg_stat_statements(conn)
     temp_spills_entry, temp_spills = _run_or_na(
         "temp_spills",
-        "Temp Spills",
+        "Derrames Temporales a Disco",
         evaluate_temp_spills,
         conn,
-        category_label="Queries Problemáticas",
+        category_label="Consultas Problemáticas",
         is_sandbox=is_sandbox,
         serialize=False,
     )
     seq_scans_entry, seq_scans = _run_or_na(
         "seq_scans",
-        "Sequential Scans",
+        "Escaneos Secuenciales",
         detect_seq_scan_queries,
         conn,
-        category_label="Queries Problemáticas",
+        category_label="Consultas Problemáticas",
         is_sandbox=is_sandbox,
         serialize=False,
     )
     top_time_entry, top_time_queries = _run_or_na(
         "top_time_queries",
-        "Queries Más Lentas",
+        "Consultas Más Lentas",
         evaluate_top_time_queries,
         conn,
-        category_label="Queries Problemáticas",
+        category_label="Consultas Problemáticas",
         is_sandbox=is_sandbox,
         serialize=False,
     )
@@ -603,23 +603,23 @@ def run_full_scan(conn, is_sandbox: bool = False) -> FullScanResponse:
         "Uso Temporal en BD",
         evaluate_database_temp_usage,
         conn,
-        category_label="Queries Problemáticas",
+        category_label="Consultas Problemáticas",
         is_sandbox=is_sandbox,
         serialize=False,
     )
     explain_entry, explain_spills = _run_or_na(
         "explain_spills",
-        "Spills por EXPLAIN",
+        "Derrames Detectados por EXPLAIN",
         evaluate_explain_spills,
         conn,
-        category_label="Queries Problemáticas",
+        category_label="Consultas Problemáticas",
         is_sandbox=is_sandbox,
         serialize=False,
     )
 
     categories = {
         "bloat": {
-            "label": "Bloat y Mantenimiento",
+            "label": "Fragmentación y Mantenimiento",
             "detectors": {
                 "table_bloat": table_bloat_entry,
                 "disabled_autovacuum": disabled_autovacuum_entry,
@@ -630,21 +630,21 @@ def run_full_scan(conn, is_sandbox: bool = False) -> FullScanResponse:
             "label": "Configuración",
             "detectors": {
                 "work_mem": {
-                    "label": "Work Mem Actual",
+                    "label": "Valor Actual de work_mem",
                     "count": len(work_mem_data),
                     "data": work_mem_data,
                 },
                 "work_mem_evaluation": _evaluated_detector(
-                    "Evaluación Work Mem", work_mem_eval,
+                    "Evaluación de work_mem", work_mem_eval,
                     detector_key="work_mem_evaluation", category_label="Configuración",
                 ),
                 "shared_buffers": {
-                    "label": "Shared Buffers Actual",
+                    "label": "Valor Actual de shared_buffers",
                     "count": len(shared_buffers_data),
                     "data": shared_buffers_data,
                 },
                 "shared_buffers_evaluation": _evaluated_detector(
-                    "Evaluación Shared Buffers", shared_buffers_eval,
+                    "Evaluación de shared_buffers", shared_buffers_eval,
                     detector_key="shared_buffers_evaluation", category_label="Configuración",
                 ),
                 "pg_stat_max_evaluation": _evaluated_detector(
@@ -652,11 +652,11 @@ def run_full_scan(conn, is_sandbox: bool = False) -> FullScanResponse:
                     detector_key="pg_stat_max_evaluation", category_label="Configuración",
                 ),
                 "pg_stat_limit": _evaluated_detector(
-                    "Límite de Tracking de Queries", pg_stat_limit,
+                    "Límite de Rastreo de Consultas", pg_stat_limit,
                     detector_key="pg_stat_limit", category_label="Configuración",
                 ),
                 "slow_query_logging": _evaluated_detector(
-                    "Logging de Queries Lentas", slow_query_logging,
+                    "Registro de Consultas Lentas", slow_query_logging,
                     detector_key="slow_query_logging", category_label="Configuración",
                 ),
             },
@@ -681,7 +681,7 @@ def run_full_scan(conn, is_sandbox: bool = False) -> FullScanResponse:
             },
         },
         "queries": {
-            "label": "Queries Problemáticas",
+            "label": "Consultas Problemáticas",
             "detectors": {
                 "pg_stat_statements": {
                     "label": "pg_stat_statements",

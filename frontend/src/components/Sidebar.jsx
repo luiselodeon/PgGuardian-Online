@@ -5,8 +5,8 @@ import './Sidebar.css'
 const navItems = [
   {
     path: '/dashboard',
-    label: 'Overview',
-    description: 'Resumen general',
+    label: 'Resumen',
+    description: 'Panel general',
   },
   {
     path: '/history',
@@ -15,7 +15,7 @@ const navItems = [
   },
   {
     path: '/bloat',
-    label: 'Bloat',
+    label: 'Fragmentación',
     description: 'Bloat y mantenimiento',
   },
   {
@@ -35,8 +35,8 @@ const navItems = [
   },
   {
     path: '/queries',
-    label: 'Queries',
-    description: 'Queries problemáticas',
+    label: 'Consultas',
+    description: 'Consultas problemáticas',
   },
 ]
 
@@ -72,7 +72,7 @@ export default function Sidebar({
           <img src={Logo} alt="PgGuardian" className="logo-img" />
           <div>
             <h1 className="logo-text">PgGuardian</h1>
-            <span className="logo-subtitle">Health Monitor</span>
+            <span className="logo-subtitle">Monitor de Salud</span>
           </div>
         </div>
       </div>

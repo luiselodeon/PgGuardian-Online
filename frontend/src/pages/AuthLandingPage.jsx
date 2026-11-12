@@ -180,7 +180,7 @@ export default function AuthLandingPage({
               segura en bases temporales sin tocar la aplicación.
             </li>
             <li>
-              <strong>Diagnóstico en 5 pilares:</strong> índices, bloat, queries lentas,
+              <strong>Diagnóstico en 5 pilares:</strong> índices, fragmentación, consultas lentas,
               configuración y salud general con SQL de remediación listo para copiar.
             </li>
             <li>

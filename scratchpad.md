@@ -785,6 +785,47 @@ En `backend/security/hashing.py`, `PASSWORD_HASHER` utiliza `argon2-cffi` con:
 - **Prueba en vivo sobre `pgguardian_api` y `pgguardian_appdb`**: confirmados `401` sin cookie en `/api/full-scan`, `/api/analyses`, `/api/bloat/table-bloat` y `/api/auth/me`, `200` en `/api/health-check`, acceso con cookie tras `register`/`login`, revocación de sesión previa tras `/api/auth/password`, invalidación tras `/api/auth/logout` y bloqueo `429` de 15 min tras 5 fallos (datos temporales eliminados al concluir).
 - **Frontend (`pgguardian_frontend`)**: `npx eslint` sobre `src/App.jsx`, `src/api/pgguardian.js`, `src/components/ProtectedRoute.jsx`, `src/components/Sidebar.jsx`, `src/components/ChangePasswordModal.jsx`, `src/pages/AuthLandingPage.jsx` y `src/pages/HistoryPage.jsx` + `npm run build` sin errores; HTTP `200` en `/`, `/dashboard` y `/register`.
 
+---
+
+## Auditoría e Implementación de Requisitos No Funcionales (RNF-01 a RNF-05)
+
+### 1. Matriz de Diagnóstico Inicial
+
+| ID | Categoría | Estado inicial | Evidencia encontrada en el código |
+|---|---|---|---|
+| **RNF-01** | Seguridad (Aislamiento) | **Parcial** | `backend/services/sandbox_runner.py` y `sql_validator.py` usan credenciales dedicadas (`SANDBOX_DB_*`), rol `NOSUPERUSER` (`sandbox_runner`), bases efímeras `sandbox_<uuid>` y bloqueo AST de `dblink`/`postgres_fdw`/FDW/roles/`COPY PROGRAM`/`ALTER SYSTEM`; sin embargo, `docker-compose.yml` compartía una sola red puente por defecto entre `sandbox_db`, `app_db` y `db`. |
+| **RNF-02** | Seguridad (Rate Limiting) | **No implementado** | Ni `backend/api/routers/auth.py` ni `backend/api/main.py` contaban con limitador de peticiones por dirección IP para `POST /api/auth/login` y `POST /api/auth/register`. |
+| **RNF-03** | Rendimiento (Latencias) | **Parcial** *(cuello $O(N^2)$ en AST)* | El hash Argon2id (`p95 = 23.0 ms`) y el análisis de 1 MB / 50 tablas (`8.17 s`) cumplían inicialmente el umbral (< 1 s y < 60 s), pero `_locate_statement` en `backend/services/sql_validator.py` recorría todos los tokens y rebanadas `sql_text[:start]` desde el inicio por cada sentencia ($O(N^2)$, `4.75 s` solo en AST para 1 MB). |
+| **RNF-04** | Usabilidad (Idioma) | **Parcial** | Permanecían etiquetas en inglés en la UI (`Warning`, `Overview`, `Health Monitor`, `Auto-refresh`, `Dashboard`, `Schema`, `Dead Tuples`, `Sequential Scans`, `Covering Index`, `Stats Obsoletas`, `Wildcards`, `Temp Spills`), en etiquetas de `scan_service.py` y en errores de `RequestValidationError` de FastAPI cuando faltan campos o hay JSON inválido (`"Field required"`). |
+| **RNF-05** | Portabilidad (Modo Local) | **Parcial** | `db` (`tiendadb`), `api` y `frontend` arrancaban localmente con TiendaDB, pero `tiendadb_idle_tx` fallaba en bucle (`Restarting (127)`) debido a saltos de línea CRLF (`\r\n`) en `scripts/start_idle_tx.sh` bajo Windows. |
+
+### 2. Acciones Tomadas y Archivos Editados
+
+- **`docker-compose.yml`** *(RNF-01)*: Se segregaron cuatro redes Docker explícitas: `app_net` (`internal: true`, exclusiva entre `api` y `app_db`), `sandbox_net` (`internal: true`, exclusiva entre `api` y `sandbox_db`), `tienda_net` (`internal: true`, entre `db`, `idle_tx` y `api`) y `public_net` (`bridge`, para puertos publicados de `db`, `api` y `frontend`).
+- **`backend/security/rate_limit.py`** y **`backend/api/main.py`** *(RNF-02)*: Se creó `SlidingWindowRateLimiter` (`max_requests=10`, `window_seconds=60`) sin dependencias externas ni Redis, montado como middleware HTTP (`enforce_auth_rate_limit`) sobre `POST /api/auth/login` y `POST /api/auth/register` devolviendo `429 Too Many Requests` con `Retry-After` y mensaje en español.
+- **`backend/services/sql_validator.py`** *(RNF-03)*: Se optimizó `_locate_statement` y `validate_sql_script` con cursor incremental de tokens y conteo incremental de saltos de línea ($O(N)$), preservando exactamente el cálculo de líneas.
+- **`backend/api/main.py`**, **`backend/services/scan_service.py`** y vistas/componentes del frontend (`SeverityBadge.jsx`, `Sidebar.jsx`, `App.jsx`, `Overview.jsx`, `BloatPage.jsx`, `ConfigPage.jsx`, `HealthPage.jsx`, `IndexesPage.jsx`, `QueriesPage.jsx`, `AuthLandingPage.jsx`) *(RNF-04)*: Se agregó `@app.exception_handler(RequestValidationError)` para traducir al español errores nativos de FastAPI/Pydantic y se tradujeron las etiquetas visibles restantes al español sin alterar las claves JSON ni las severidades internas.
+- **`scripts/start_idle_tx.sh`** y **`.gitattributes`** *(RNF-05)*: Se normalizó `start_idle_tx.sh` a finales de línea LF (`\n`) y se añadió `*.sh text eol=lf` en `.gitattributes` para evitar regresiones al clonar en Windows.
+- **`backend/tests/test_rnf.py`** *(creado)*: Cobertura unitaria de RNF-02 (10 req/min por IP, `429` en español, recuperación tras 60 s), RNF-03 (exactitud de líneas y velocidad lineal en AST) y RNF-04 (handler en español para campos faltantes).
+
+### 3. Mecanismos Implementados
+
+1. **Aislamiento de redes y privilegios (RNF-01):** `sandbox_db` únicamente pertenece a `sandbox_net` (`internal: true`), por lo que no puede resolver ni alcanzar `app_db` ni `db`, ni abrir tráfico saliente; la ejecución corre bajo el rol `sandbox_runner` (`NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOREPLICATION`) en bases temporales `sandbox_<uuid>` con `REVOKE ALL ... FROM PUBLIC`.
+2. **Rate limiting en memoria por IP (RNF-02):** `SlidingWindowRateLimiter` usa `threading.Lock`, `collections.deque` y `time.monotonic()` por par `(ruta, ip)` podando entradas expiradas y acotando el diccionario en memoria. Lee `request.client.host` por defecto (y solo acepta `X-Forwarded-For` si `TRUST_PROXY_HEADERS=true`) para evitar suplantación de IP.
+3. **Optimización de latencias (RNF-03):** Tras el cursor incremental en `validate_sql_script`, el tiempo de validación AST para 1 MB / 50 tablas (3,750 sentencias) bajó de `4.75 s` a `0.48 s` (tiempo total de análisis end-to-end en sandbox: `4.11 s` frente al límite de `60 s`); las peticiones HTTP a `POST /api/auth/login` registraron `p50 = 41.3 ms` y `p95 = 50.1 ms` (frente al límite de `1,000 ms`).
+
+### 4. Verificación y No-Regresión (RNF-05)
+
+- **Pruebas unitarias (`docker exec pgguardian_api python -m unittest discover -s tests -v`)**: **54 pruebas aprobadas** (`OK` en 0.775 s).
+- **Frontend (`pgguardian_frontend`)**: `npx eslint` sin errores sobre los 14 archivos modificados/creados y `npm run build` exitoso (257 ms).
+- **Verificación en vivo sobre contenedores recreados (`docker compose up -d --build`)**:
+  - **RNF-01:** `getent hosts app_db` desde `pgguardian_sandboxdb` falló por aislamiento de red y `pg_roles` confirmó `sandbox_runner` sin privilegios (`f/f/f/f`).
+  - **RNF-02:** 10 peticiones `POST /api/auth/register` aceptadas (evaluación normal) y la 11.ª rechazada con `429` en español.
+  - **RNF-03:** Login HTTP `p95 = 50.1 ms` (< 1 s); análisis 1 MB / 50 tablas = `4.11 s` (< 60 s).
+  - **RNF-04:** `POST /api/auth/register` con `{}` devolvió `422` con `"Este campo es obligatorio."`.
+  - **RNF-05:** `tiendadb_idle_tx` quedó estable (`Up` sin reinicios) y `GET /api/full-scan` sobre TiendaDB respondió `200` (`health_score=0`, `total_findings=64`) con categorías en español.
+
+
 
 
 

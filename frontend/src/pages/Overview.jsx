@@ -24,7 +24,7 @@ export default function Overview({ scanData, isLoading, lastScan, activeTab }) {
       <div className="overview-header">
         <div>
           <div className="overview-title-row">
-            <h1 className="page-title">Dashboard</h1>
+            <h1 className="page-title">Panel General</h1>
             <span className={`overview-source-pill ${isSandbox ? 'source--sandbox' : 'source--local'}`}>
               {isSandbox ? `Sandbox: ${tabTitle}` : 'TiendaDB (Local · init/)'}
             </span>
