@@ -19,7 +19,9 @@ import IndexesPage from './pages/IndexesPage'
 import QueriesPage from './pages/QueriesPage'
 import {
   fullScan,
+  getAnalysisDetail,
   getCurrentUser,
+  listAnalyses,
   logoutUser,
   setUnauthorizedHandler,
 } from './api/pgguardian'
@@ -147,6 +149,45 @@ export default function App() {
       cancelled = true
     }
   }, [user, updateLocalTab])
+
+  // Restaurar automáticamente el último análisis guardado del usuario al iniciar sesión o recargar
+  useEffect(() => {
+    if (!user) return
+    let cancelled = false
+    listAnalyses()
+      .then((res) => {
+        const latestItem = res?.items?.[0]
+        if (!latestItem?.id || cancelled) return null
+        return getAnalysisDetail(latestItem.id)
+      })
+      .then((detail) => {
+        if (cancelled || !detail?.id || !detail?.scan) return
+        setTabs((prev) => {
+          if (prev.some((t) => t.id === detail.id)) return prev
+          return [
+            ...prev,
+            {
+              id: detail.id,
+              label: detail.name || 'Análisis Guardado',
+              kind: 'sandbox',
+              closable: true,
+              scanData: detail.scan,
+              lastScan: detail.created_at,
+              isLoading: false,
+              error: null,
+              meta: detail,
+            },
+          ]
+        })
+        setActiveTabId((curr) => (curr === LOCAL_TAB_ID ? detail.id : curr))
+      })
+      .catch(() => {
+        // Silencioso para no bloquear el dashboard local si no hay historial previo
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [user])
 
   // Auto-refresh solo cuando hay sesión activa
   useEffect(() => {

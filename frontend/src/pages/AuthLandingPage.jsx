@@ -27,6 +27,47 @@ function containsEmailPart(password, email) {
   )
 }
 
+function EyeIcon({ open }) {
+  return open ? (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M17.94 17.94A10.94 10.94 0 0 1 12 20c-7 0-11-8-11-8a21.77 21.77 0 0 1 5.06-5.94" />
+      <path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a21.85 21.85 0 0 1-2.16 3.19" />
+      <path d="M14.12 14.12a3 3 0 1 1-4.24-4.24" />
+      <line x1="1" y1="1" x2="23" y2="23" />
+    </svg>
+  ) : (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
+      <circle cx="12" cy="12" r="3" />
+    </svg>
+  )
+}
+
+function PasswordInput({ visible, onToggle, disabled, ...inputProps }) {
+  const toggleLabel = visible ? 'Ocultar contraseña' : 'Mostrar contraseña'
+  return (
+    <div className="auth-password-wrap">
+      <input
+        {...inputProps}
+        type={visible ? 'text' : 'password'}
+        className="auth-input auth-input--password"
+        disabled={disabled}
+      />
+      <button
+        type="button"
+        className="auth-eye-btn"
+        onClick={onToggle}
+        disabled={disabled}
+        aria-label={toggleLabel}
+        aria-pressed={visible}
+        title={toggleLabel}
+      >
+        <EyeIcon open={visible} />
+      </button>
+    </div>
+  )
+}
+
 export default function AuthLandingPage({
   initialTab = 'login',
   initialError = null,
@@ -241,28 +282,18 @@ export default function AuthLandingPage({
               </div>
 
               <div className="auth-field">
-                <div className="auth-label-row">
-                  <label htmlFor="login-password" className="auth-label">
-                    Contraseña
-                  </label>
-                  <button
-                    type="button"
-                    className="auth-toggle-btn"
-                    onClick={() => setShowPasswords((v) => !v)}
-                    disabled={isSubmitting}
-                  >
-                    {showPasswords ? 'Ocultar' : 'Mostrar'}
-                  </button>
-                </div>
-                <input
+                <label htmlFor="login-password" className="auth-label">
+                  Contraseña
+                </label>
+                <PasswordInput
                   id="login-password"
                   name="password"
-                  type={showPasswords ? 'text' : 'password'}
-                  className="auth-input"
                   placeholder="Ingresa tu contraseña"
                   value={loginPassword}
                   onChange={(e) => setLoginPassword(e.target.value)}
                   autoComplete="current-password"
+                  visible={showPasswords}
+                  onToggle={() => setShowPasswords((v) => !v)}
                   disabled={isSubmitting}
                   required
                 />
@@ -326,29 +357,19 @@ export default function AuthLandingPage({
               </div>
 
               <div className="auth-field">
-                <div className="auth-label-row">
-                  <label htmlFor="reg-password" className="auth-label">
-                    Contraseña
-                  </label>
-                  <button
-                    type="button"
-                    className="auth-toggle-btn"
-                    onClick={() => setShowPasswords((v) => !v)}
-                    disabled={isSubmitting}
-                  >
-                    {showPasswords ? 'Ocultar' : 'Mostrar'}
-                  </button>
-                </div>
-                <input
+                <label htmlFor="reg-password" className="auth-label">
+                  Contraseña
+                </label>
+                <PasswordInput
                   id="reg-password"
                   name="password"
-                  type={showPasswords ? 'text' : 'password'}
-                  className="auth-input"
                   placeholder="Mínimo 12 caracteres únicos"
                   value={regPassword}
                   onChange={(e) => setRegPassword(e.target.value)}
                   autoComplete="new-password"
                   maxLength={128}
+                  visible={showPasswords}
+                  onToggle={() => setShowPasswords((v) => !v)}
                   disabled={isSubmitting}
                   required
                 />
@@ -358,16 +379,16 @@ export default function AuthLandingPage({
                 <label htmlFor="reg-password-confirm" className="auth-label">
                   Confirmar contraseña
                 </label>
-                <input
+                <PasswordInput
                   id="reg-password-confirm"
                   name="password_confirm"
-                  type={showPasswords ? 'text' : 'password'}
-                  className="auth-input"
                   placeholder="Repite tu contraseña"
                   value={regPasswordConfirm}
                   onChange={(e) => setRegPasswordConfirm(e.target.value)}
                   autoComplete="new-password"
                   maxLength={128}
+                  visible={showPasswords}
+                  onToggle={() => setShowPasswords((v) => !v)}
                   disabled={isSubmitting}
                   required
                 />

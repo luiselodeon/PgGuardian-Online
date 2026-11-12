@@ -133,7 +133,8 @@ export default function HistoryPage({ currentUser, refreshKey, onOpenTab, onDele
       ) : items.length === 0 ? (
         <div className="history-empty">
           <p>
-            No hay análisis registrados para <code className="mono">{currentUser}</code>.
+            No hay análisis registrados para{' '}
+            <code className="mono">{currentUser?.email || currentUser?.name || ''}</code>.
           </p>
           <p className="history-empty-hint">
             Usa el botón <strong>«Nuevo análisis»</strong> en la barra superior para cargar scripts <code className="mono">.sql</code>.

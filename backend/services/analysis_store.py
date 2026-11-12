@@ -16,32 +16,6 @@ from psycopg2 import extras
 SANDBOX_TTL_HOURS = 24
 
 _SCHEMA_DDL = """
-CREATE TABLE IF NOT EXISTS analyses (
-    id UUID PRIMARY KEY,
-    user_id VARCHAR(128) NOT NULL,
-    name VARCHAR(200) NOT NULL,
-    status VARCHAR(32) NOT NULL,
-    message TEXT NOT NULL,
-    file_count INTEGER NOT NULL,
-    total_size_bytes BIGINT NOT NULL,
-    files_json JSONB NOT NULL,
-    sandbox_db_name VARCHAR(63) NOT NULL,
-    sandbox_status VARCHAR(20) NOT NULL DEFAULT 'active',
-    sandbox_expires_at TIMESTAMPTZ NOT NULL,
-    sandbox_destroyed_at TIMESTAMPTZ,
-    executed_statements INTEGER NOT NULL,
-    execution_time_ms INTEGER NOT NULL,
-    health_score INTEGER NOT NULL,
-    total_findings INTEGER NOT NULL,
-    scan_json JSONB NOT NULL,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-);
-CREATE INDEX IF NOT EXISTS idx_analyses_user_created
-    ON analyses (user_id, created_at DESC);
-CREATE INDEX IF NOT EXISTS idx_analyses_sandbox_expiry
-    ON analyses (sandbox_status, sandbox_expires_at)
-    WHERE sandbox_status = 'active';
-
 CREATE TABLE IF NOT EXISTS users (
     id UUID PRIMARY KEY,
     name VARCHAR(150) NOT NULL,
@@ -65,6 +39,71 @@ CREATE TABLE IF NOT EXISTS sessions (
 );
 CREATE INDEX IF NOT EXISTS idx_sessions_user_active
     ON sessions (user_id, revoked_at, expires_at);
+
+CREATE TABLE IF NOT EXISTS analyses (
+    id UUID PRIMARY KEY,
+    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    name VARCHAR(200) NOT NULL,
+    status VARCHAR(32) NOT NULL,
+    message TEXT NOT NULL,
+    file_count INTEGER NOT NULL,
+    total_size_bytes BIGINT NOT NULL,
+    files_json JSONB NOT NULL,
+    sandbox_db_name VARCHAR(63) NOT NULL,
+    sandbox_status VARCHAR(20) NOT NULL DEFAULT 'active',
+    sandbox_expires_at TIMESTAMPTZ NOT NULL,
+    sandbox_destroyed_at TIMESTAMPTZ,
+    executed_statements INTEGER NOT NULL,
+    execution_time_ms INTEGER NOT NULL,
+    health_score INTEGER NOT NULL,
+    total_findings INTEGER NOT NULL,
+    scan_json JSONB NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+DO $$
+BEGIN
+    IF EXISTS (
+        SELECT 1
+        FROM information_schema.columns
+        WHERE table_schema = 'public'
+          AND table_name = 'analyses'
+          AND column_name = 'user_id'
+          AND data_type <> 'uuid'
+    ) THEN
+        DELETE FROM analyses
+        WHERE user_id NOT IN (SELECT id::text FROM users);
+
+        ALTER TABLE analyses
+            ALTER COLUMN user_id TYPE UUID USING user_id::uuid;
+    END IF;
+
+    IF NOT EXISTS (
+        SELECT 1
+        FROM pg_constraint
+        WHERE conname = 'fk_analyses_user'
+          AND conrelid = 'analyses'::regclass
+    ) AND NOT EXISTS (
+        SELECT 1
+        FROM pg_constraint
+        WHERE confrelid = 'users'::regclass
+          AND conrelid = 'analyses'::regclass
+          AND contype = 'f'
+    ) THEN
+        DELETE FROM analyses a
+        WHERE NOT EXISTS (SELECT 1 FROM users u WHERE u.id = a.user_id);
+
+        ALTER TABLE analyses
+            ADD CONSTRAINT fk_analyses_user
+            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE;
+    END IF;
+END $$;
+
+CREATE INDEX IF NOT EXISTS idx_analyses_user_created
+    ON analyses (user_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_analyses_sandbox_expiry
+    ON analyses (sandbox_status, sandbox_expires_at)
+    WHERE sandbox_status = 'active';
 """
 
 
@@ -125,7 +164,7 @@ def insert_analysis(
         %s, %s, %s, %s,
         %s, %s
     )
-    RETURNING id::text, user_id, name, status, message, file_count, total_size_bytes,
+    RETURNING id::text, user_id::text, name, status, message, file_count, total_size_bytes,
               files_json AS files, sandbox_db_name, sandbox_status, sandbox_expires_at,
               sandbox_destroyed_at, executed_statements, execution_time_ms,
               health_score, total_findings, scan_json AS scan, created_at;
@@ -161,8 +200,12 @@ def insert_analysis(
 
 def list_analyses_for_user(user_id: str) -> list[dict]:
     """Devuelve únicamente el historial de análisis pertenecientes al usuario."""
+    normalized_user_id = _parse_uuid_or_none(user_id)
+    if normalized_user_id is None:
+        return []
+
     query = """
-    SELECT id::text, user_id, name, status, file_count, total_size_bytes,
+    SELECT id::text, user_id::text, name, status, file_count, total_size_bytes,
            sandbox_db_name, sandbox_status, sandbox_expires_at,
            sandbox_destroyed_at, executed_statements, execution_time_ms,
            health_score, total_findings, created_at
@@ -173,7 +216,7 @@ def list_analyses_for_user(user_id: str) -> list[dict]:
     conn = _connect_app_db()
     try:
         with conn.cursor(cursor_factory=extras.RealDictCursor) as cur:
-            cur.execute(query, (user_id,))
+            cur.execute(query, (normalized_user_id,))
             return [dict(row) for row in cur.fetchall()]
     finally:
         conn.close()
@@ -189,11 +232,12 @@ def _parse_uuid_or_none(value: str) -> str | None:
 def get_analysis_for_user(analysis_id: str, user_id: str) -> dict | None:
     """Obtiene el detalle de un análisis validando propiedad del usuario."""
     normalized_id = _parse_uuid_or_none(analysis_id)
-    if normalized_id is None:
+    normalized_user_id = _parse_uuid_or_none(user_id)
+    if normalized_id is None or normalized_user_id is None:
         return None
 
     query = """
-    SELECT id::text, user_id, name, status, message, file_count, total_size_bytes,
+    SELECT id::text, user_id::text, name, status, message, file_count, total_size_bytes,
            files_json AS files, sandbox_db_name, sandbox_status, sandbox_expires_at,
            sandbox_destroyed_at, executed_statements, execution_time_ms,
            health_score, total_findings, scan_json AS scan, created_at
@@ -203,7 +247,7 @@ def get_analysis_for_user(analysis_id: str, user_id: str) -> dict | None:
     conn = _connect_app_db()
     try:
         with conn.cursor(cursor_factory=extras.RealDictCursor) as cur:
-            cur.execute(query, (normalized_id, user_id))
+            cur.execute(query, (normalized_id, normalized_user_id))
             row = cur.fetchone()
             return dict(row) if row else None
     finally:
@@ -213,7 +257,8 @@ def get_analysis_for_user(analysis_id: str, user_id: str) -> dict | None:
 def delete_analysis_for_user(analysis_id: str, user_id: str) -> dict | None:
     """Elimina un análisis únicamente si pertenece al usuario autenticado."""
     normalized_id = _parse_uuid_or_none(analysis_id)
-    if normalized_id is None:
+    normalized_user_id = _parse_uuid_or_none(user_id)
+    if normalized_id is None or normalized_user_id is None:
         return None
 
     query = """
@@ -224,7 +269,7 @@ def delete_analysis_for_user(analysis_id: str, user_id: str) -> dict | None:
     conn = _connect_app_db()
     try:
         with conn.cursor(cursor_factory=extras.RealDictCursor) as cur:
-            cur.execute(query, (normalized_id, user_id))
+            cur.execute(query, (normalized_id, normalized_user_id))
             row = cur.fetchone()
             return dict(row) if row else None
     finally:

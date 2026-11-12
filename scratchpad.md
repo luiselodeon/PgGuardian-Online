@@ -825,6 +825,49 @@ En `backend/security/hashing.py`, `PASSWORD_HASHER` utiliza `argon2-cffi` con:
   - **RNF-04:** `POST /api/auth/register` con `{}` devolvió `422` con `"Este campo es obligatorio."`.
   - **RNF-05:** `tiendadb_idle_tx` quedó estable (`Up` sin reinicios) y `GET /api/full-scan` sobre TiendaDB respondió `200` (`health_score=0`, `total_findings=64`) con categorías en español.
 
+---
+
+## Persistencia de Análisis de Bases de Datos por Usuario (`app_db`)
+
+### 1. Archivos Modificados en Backend y Frontend
+
+- **`backend/services/analysis_store.py`** *(modificado)*:
+  - Se formalizó la relación entre `analyses` y `users` definiendo `user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE` en `_SCHEMA_DDL` (y bloque migratorio idempotente para actualizar esquemas previos agregando la llave foránea `fk_analyses_user` conservando análisis pertenecientes a usuarios válidos).
+  - Todas las consultas (`insert_analysis`, `list_analyses_for_user`, `get_analysis_for_user`, `delete_analysis_for_user`) proyectan `user_id::text`, validan UUID en entrada (`_parse_uuid_or_none`) y filtran estrictamente por el `user_id` autenticado (RF-01.8).
+- **`backend/tests/test_analyses_lifecycle.py`** *(modificado)*: Se añadió `test_analyses_schema_has_users_fk_and_store_guards_non_uuid_user` validando la llave foránea `REFERENCES users(id) ON DELETE CASCADE` y el rechazo seguro de identificadores no UUID.
+- **`frontend/src/App.jsx`** *(modificado)*:
+  - Se incorporó un efecto ligado a `user` que consulta automáticamente `listAnalyses()` (`GET /api/analyses`) y, si el usuario cuenta con análisis previos en `app_db`, obtiene el detalle del más reciente vía `getAnalysisDetail(items[0].id)` (`GET /api/analyses/{id}`) para restaurar su pestaña junto con **TiendaDB (Local)** al iniciar sesión o recargar la página.
+- **`frontend/src/pages/HistoryPage.jsx`** *(modificado)*: Se corrigió la interpolación `{currentUser?.email || currentUser?.name || ''}` en el mensaje de estado vacío para evitar errores de renderizado en React 19 cuando el usuario aún no tiene análisis registrados.
+
+### 2. Esquema Relacional y JSON en `app_db`
+
+Tabla `public.analyses` en `app_db`:
+- **Identidad y propiedad:** `id UUID PRIMARY KEY`, `user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE` (`fk_analyses_user`), índice `idx_analyses_user_created (user_id, created_at DESC)`.
+- **Metadatos del análisis (sin contenido SQL crudo):** `name VARCHAR(200)`, `status VARCHAR(32)`, `message TEXT`, `file_count INTEGER`, `total_size_bytes BIGINT`, `files_json JSONB` (almacena exclusivamente `order`, `filename`, `size_bytes`, `encoding`, `line_count`; nunca el texto fuente `.sql` ni credenciales).
+- **Resumen y hallazgos permanentes:** `health_score INTEGER`, `total_findings INTEGER`, `scan_json JSONB` (reporte completo de categorías, detectores, severidades, evidencia y pasos de remediación), `executed_statements INTEGER`, `execution_time_ms INTEGER`, `created_at TIMESTAMPTZ`.
+- **Ciclo sandbox (24 h):** `sandbox_db_name VARCHAR(63)`, `sandbox_status VARCHAR(20)`, `sandbox_expires_at TIMESTAMPTZ`, `sandbox_destroyed_at TIMESTAMPTZ`. Al destruirse la base temporal en `sandbox_db` tras 24 h (`sandbox_status = 'destroyed'`), el reporte en `app_db` permanece consultable en el historial y en las pestañas.
+
+### 3. Flujo de Restauración en Frontend tras Iniciar Sesión
+
+1. Al completar el login (`POST /api/auth/login`), registro (`POST /api/auth/register`) o recargar el navegador con cookie `HttpOnly` activa (`GET /api/auth/me`), `App.jsx` ejecuta simultáneamente:
+   - `fullScan()` para mantener actualizada la pestaña base **TiendaDB (Local)**.
+   - `listAnalyses()` (`GET /api/analyses`) ordenado por `created_at DESC`.
+2. Si existen análisis guardados (`items.length > 0`), solicita `getAnalysisDetail(items[0].id)` y agrega automáticamente la pestaña restaurada en `AnalysisTabs`, enfocándola si el usuario estaba en la pestaña por defecto sin perder **TiendaDB (Local)** ni pestañas ya abiertas.
+3. En `/history` (`HistoryPage.jsx`), el usuario puede inspeccionar o abrir en pestaña cualquiera de sus análisis históricos (`Abrir pestaña`) sin volver a cargar los archivos `.sql`.
+4. Al crear un análisis nuevo en `NewAnalysisModal`, se persiste en `app_db`, se agrega la nueva pestaña manteniendo las anteriores y se incrementa `historyRefreshKey`.
+
+### 4. Verificación Realizada
+
+- **Pruebas unitarias (`docker exec pgguardian_api python -m unittest discover -s tests -v`)**: **55 pruebas aprobadas** (`OK` en 0.741 s).
+- **Esquema en `pgguardian_appdb`**: `\d analyses` confirmó `user_id uuid NOT NULL` con llave foránea `fk_analyses_user` hacia `users(id)` y preservación de los 2 análisis existentes de usuario real.
+- **Prueba end-to-end tras cierre de sesión y re-ingreso**:
+  1. Registro de usuario A y carga de `ventas.sql` vía `POST /api/analyses` (`201 Created`, `health_score=49`, `files` sin campo `content`).
+  2. Cierre de sesión (`POST /api/auth/logout`) e inicio de sesión nuevo (`POST /api/auth/login` con cookie jar limpio).
+  3. `GET /api/analyses` devolvió el registro guardado y `GET /api/analyses/{id}` devolvió el reporte completo sin re-subir el script.
+  4. Usuario B recibió lista vacía (`total=0`) en `GET /api/analyses` y `404` en `GET /api/analyses/{id}` (RF-01.8 / CA-03). Registros de prueba limpiados al concluir.
+- **Frontend (`pgguardian_frontend`)**: `npx eslint src/App.jsx src/pages/HistoryPage.jsx` y `npm run build` sin errores.
+
+
 
 
 

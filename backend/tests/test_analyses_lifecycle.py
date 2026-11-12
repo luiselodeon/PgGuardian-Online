@@ -12,6 +12,12 @@ from api.routers.analyses import (
     list_analyses,
 )
 from security.sessions import create_access_token
+from services.analysis_store import (
+    _SCHEMA_DDL,
+    delete_analysis_for_user,
+    get_analysis_for_user,
+    list_analyses_for_user,
+)
 from services.sandbox_cleanup import cleanup_expired_sandboxes
 
 
@@ -151,6 +157,12 @@ class AnalysesLifecycleAndIsolationTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(purged, 1)
         mock_mark.assert_called_once_with("11111111-1111-1111-1111-111111111111")
+
+    def test_analyses_schema_has_users_fk_and_store_guards_non_uuid_user(self):
+        self.assertIn("user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE", _SCHEMA_DDL)
+        self.assertEqual(list_analyses_for_user("no-es-uuid"), [])
+        self.assertIsNone(get_analysis_for_user(str(uuid4()), "no-es-uuid"))
+        self.assertIsNone(delete_analysis_for_user(str(uuid4()), "no-es-uuid"))
 
 
 if __name__ == "__main__":
