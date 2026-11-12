@@ -3,7 +3,7 @@ Este documento, así como todos los documentos bajo la carpeta de components,
 pages y api, fueron hechos con ayuda de Inteligencia Artificial.
 */
 import { useState, useEffect, useCallback } from 'react'
-import { Routes, Route, useNavigate } from 'react-router-dom'
+import { Routes, Route, useLocation, useNavigate } from 'react-router-dom'
 import Sidebar from './components/Sidebar'
 import AnalysisTabs from './components/AnalysisTabs'
 import NewAnalysisModal from './components/NewAnalysisModal'
@@ -35,7 +35,8 @@ function createLocalTab() {
 
 export default function App() {
   const navigate = useNavigate()
-  const [tabs, setTabs] = useState([createLocalTab])
+  const location = useLocation()
+  const [tabs, setTabs] = useState(() => [createLocalTab()])
   const [activeTabId, setActiveTabId] = useState(LOCAL_TAB_ID)
   const [autoRefresh, setAutoRefresh] = useState(true)
   const [isNewAnalysisOpen, setIsNewAnalysisOpen] = useState(false)
@@ -50,8 +51,10 @@ export default function App() {
     )
   }, [])
 
-  const runScan = useCallback(async () => {
-    updateLocalTab({ isLoading: true, error: null })
+  const runScan = useCallback(async ({ silent = false } = {}) => {
+    if (!silent) {
+      updateLocalTab({ isLoading: true, error: null })
+    }
     try {
       const data = await fullScan()
       updateLocalTab({
@@ -91,12 +94,19 @@ export default function App() {
     }
   }, [updateLocalTab])
 
-  // Auto-refresh polling only updates TiendaDB (Local) without altering sandbox tabs
+  // Auto-refresh polling only updates TiendaDB (Local) silently without replacing UI with skeletons
   useEffect(() => {
     if (!autoRefresh) return
-    const interval = setInterval(runScan, POLL_INTERVAL)
+    const interval = setInterval(() => runScan({ silent: true }), POLL_INTERVAL)
     return () => clearInterval(interval)
   }, [autoRefresh, runScan])
+
+  const handleSelectTab = useCallback((tabId) => {
+    setActiveTabId(tabId)
+    if (location.pathname === '/history') {
+      navigate('/')
+    }
+  }, [location.pathname, navigate])
 
   const openSandboxTab = useCallback((analysis) => {
     if (!analysis?.id || !analysis?.scan) return
@@ -211,7 +221,7 @@ export default function App() {
         <AnalysisTabs
           tabs={tabs}
           activeTabId={activeTabId}
-          onSelectTab={setActiveTabId}
+          onSelectTab={handleSelectTab}
           onCloseTab={closeTab}
         />
 

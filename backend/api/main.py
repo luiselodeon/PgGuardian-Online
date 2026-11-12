@@ -59,6 +59,7 @@ app = FastAPI(
 
 origins = [
     "http://localhost:5173",    # Para seguir probando localmente
+    "http://127.0.0.1:5173",
     "https://pgguardian-frontend.onrender.com" 
 ]
 
