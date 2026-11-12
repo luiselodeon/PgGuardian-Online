@@ -1,0 +1,132 @@
+# =====================================================================
+# PgGuardian — Docker Compose de Producción / PoC AWS EC2 (RF-03)
+#
+# Levanta 5 servicios: proxy (Caddy), frontend (nginx), api (FastAPI
+# sin --reload), app_db y sandbox_db. Únicamente Caddy expone 80 y 443.
+# Uso:
+#   docker compose -f docker-compose.prod.yml up -d --build
+# =====================================================================
+
+services:
+  proxy:
+    image: caddy:2-alpine
+    container_name: pgguardian_proxy
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      APP_DOMAIN: ${APP_DOMAIN:-:80}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    networks:
+      - public_net
+    depends_on:
+      - api
+      - frontend
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile.prod
+      args:
+        VITE_API_URL: ${VITE_API_URL:-/api}
+    container_name: pgguardian_frontend_prod
+    restart: unless-stopped
+    networks:
+      - public_net
+    depends_on:
+      - api
+
+  api:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.api
+    container_name: pgguardian_api_prod
+    restart: unless-stopped
+    command: ["uvicorn", "api.main:app", "--host", "0.0.0.0", "--port", "8000"]
+    environment:
+      APP_DB_HOST: app_db
+      APP_DB_PORT: 5432
+      APP_DB_NAME: ${APP_DB_NAME}
+      APP_DB_USER: ${APP_DB_USER}
+      APP_DB_PASSWORD: ${APP_DB_PASSWORD}
+      SANDBOX_DB_HOST: sandbox_db
+      SANDBOX_DB_PORT: 5432
+      SANDBOX_DB_NAME: ${SANDBOX_DB_NAME}
+      SANDBOX_DB_ADMIN_USER: ${SANDBOX_DB_ADMIN_USER}
+      SANDBOX_DB_ADMIN_PASSWORD: ${SANDBOX_DB_ADMIN_PASSWORD}
+      SANDBOX_DB_EXEC_USER: ${SANDBOX_DB_EXEC_USER}
+      SANDBOX_DB_EXEC_PASSWORD: ${SANDBOX_DB_EXEC_PASSWORD}
+      JWT_SECRET: ${JWT_SECRET}
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost}
+      COOKIE_SECURE: ${COOKIE_SECURE:-true}
+      TRUST_PROXY_HEADERS: ${TRUST_PROXY_HEADERS:-true}
+    networks:
+      - public_net
+      - app_net
+      - sandbox_net
+    depends_on:
+      app_db:
+        condition: service_healthy
+      sandbox_db:
+        condition: service_healthy
+
+  app_db:
+    image: postgres:16
+    container_name: pgguardian_appdb_prod
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${APP_DB_NAME}
+      POSTGRES_USER: ${APP_DB_USER}
+      POSTGRES_PASSWORD: ${APP_DB_PASSWORD}
+    volumes:
+      - app_data:/var/lib/postgresql/data
+    networks:
+      - app_net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${APP_DB_USER} -d ${APP_DB_NAME}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  sandbox_db:
+    image: postgres:16
+    container_name: pgguardian_sandboxdb_prod
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${SANDBOX_DB_NAME}
+      POSTGRES_USER: ${SANDBOX_DB_ADMIN_USER}
+      POSTGRES_PASSWORD: ${SANDBOX_DB_ADMIN_PASSWORD}
+    volumes:
+      - sandbox_data:/var/lib/postgresql/data
+    networks:
+      - sandbox_net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${SANDBOX_DB_ADMIN_USER} -d ${SANDBOX_DB_NAME}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+networks:
+  public_net:
+    driver: bridge
+  app_net:
+    driver: bridge
+    internal: true
+  sandbox_net:
+    driver: bridge
+    internal: true
+
+volumes:
+  app_data:
+    name: pgguardian_app_data
+  sandbox_data:
+    name: pgguardian_sandbox_data
+  caddy_data:
+    name: pgguardian_caddy_data
+  caddy_config:
+    name: pgguardian_caddy_config
+

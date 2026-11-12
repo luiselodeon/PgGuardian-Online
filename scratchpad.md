@@ -867,6 +867,29 @@ Tabla `public.analyses` en `app_db`:
   4. Usuario B recibió lista vacía (`total=0`) en `GET /api/analyses` y `404` en `GET /api/analyses/{id}` (RF-01.8 / CA-03). Registros de prueba limpiados al concluir.
 - **Frontend (`pgguardian_frontend`)**: `npx eslint src/App.jsx src/pages/HistoryPage.jsx` y `npm run build` sin errores.
 
+---
+
+## RF-03 - Preparación de Despliegue en Producción (Caddy, Nginx y Variables de Entorno)
+
+*(Implementación en repositorio de los artefactos de RF-03.2, RF-03.4 y RF-03.5; la provisión física en AWS EC2, Security Groups, IP elástica y AWS Budgets quedan para operación en consola AWS).*
+
+### 1. Archivos Creados y Modificados
+- **`docker-compose.prod.yml`** *(creado)*: Orquestación de producción con 5 servicios (`proxy` con `caddy:2-alpine`, `frontend` compilado, `api` con `uvicorn` **sin** `--reload`, `app_db` y `sandbox_db`). Únicamente `proxy` publica puertos (`80:80` y `443:443`); `app_db` y `sandbox_db` operan en redes internas aisladas (`app_net`, `sandbox_net`).
+- **`Caddyfile`** *(creado)*: Proxy inverso parametrizado con `{$APP_DOMAIN::80}` que envía `/api/*` hacia `api:8000` y el resto de rutas hacia `frontend:80`, soportando HTTPS automático con Let's Encrypt (`sslip.io` / DuckDNS) o modo HTTP `:80`.
+- **`frontend/Dockerfile.prod`** y **`frontend/nginx.conf`** *(creados)*: Build multi-stage (`node:20-alpine` $\rightarrow$ `nginx:1.27-alpine`) que compila el bundle estático con `ARG VITE_API_URL=/api` y configura `try_files $uri $uri/ /index.html;` para enrutamiento SPA.
+- **`.env.prod.example`** *(creado)*: Plantilla de entorno de producción sin secretos reales (`APP_DOMAIN`, `VITE_API_URL`, `CORS_ORIGINS`, `COOKIE_SECURE=true`, `TRUST_PROXY_HEADERS=true`, `JWT_SECRET`, `APP_DB_*` y `SANDBOX_DB_*`), indicando `chmod 600 .env` en el servidor.
+- **`backend/api/main.py`** *(modificado)*:
+  - `_get_cors_origins()` lee `CORS_ORIGINS` (separado por comas) con fallback a los orígenes locales por defecto para no afectar RNF-05.
+  - `GET /api/health-check` consulta `TiendaDB` cuando existe `DB_HOST` (modo local) y `connect_app_db()` cuando no se define `DB_HOST` (modo producción sin `TiendaDB`), devolviendo el campo `target` (`"tiendadb"` | `"app_db"`).
+- **`backend/tests/test_rnf.py`** *(modificado)*: Se añadieron `test_rf03_cors_origins_reads_env_or_falls_back_to_local_defaults` y `test_rf03_health_check_uses_app_db_without_db_host_and_tiendadb_when_set`.
+
+### 2. Verificación Ejecutada
+- `docker compose -f docker-compose.prod.yml --env-file .env.prod.example config --quiet`: validación exitosa de sintaxis, redes, volúmenes y variables (`exit 0`).
+- `docker build -t pgguardian-frontend-prod-check -f frontend/Dockerfile.prod frontend --build-arg VITE_API_URL=https://3-14-15-92.sslip.io/api`: compilación multi-stage exitosa con Vite + Nginx (imagen temporal eliminada después).
+- `docker exec pgguardian_api python -m unittest discover -s tests -v`: **57 pruebas aprobadas** (`OK` en 0.836 s).
+- `GET http://localhost:8000/api/health-check` en entorno local con `DB_HOST=db`: respondió HTTP `200` con `"status": "ok"`, `"target": "tiendadb"`.
+
+
 
 
 

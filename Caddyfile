@@ -1,0 +1,15 @@
+# PgGuardian — Reverse proxy de producción (RF-03.2 / RF-03.4)
+# En EC2 define APP_DOMAIN=<IP-con-guiones>.sslip.io (o subdominio DuckDNS) en .env
+# para obtener HTTPS automático vía Let's Encrypt; usa ":80" para modo HTTP.
+{$APP_DOMAIN::80} {
+    encode gzip
+
+    handle /api/* {
+        reverse_proxy api:8000
+    }
+
+    handle {
+        reverse_proxy frontend:80
+    }
+}
+

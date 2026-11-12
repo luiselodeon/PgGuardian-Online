@@ -1,12 +1,18 @@
 import asyncio
+import os
 import time
 import unittest
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 from fastapi.exceptions import RequestValidationError
 from starlette.requests import Request
 
-from api.main import enforce_auth_rate_limit, spanish_validation_exception_handler
+from api.main import (
+    _get_cors_origins,
+    enforce_auth_rate_limit,
+    health_check,
+    spanish_validation_exception_handler,
+)
 from security.rate_limit import SlidingWindowRateLimiter, auth_rate_limiter
 from services.sql_validator import validate_sql_script
 
@@ -99,4 +105,48 @@ class RnfSecurityAndQualityTests(unittest.TestCase):
         body = res.body.decode("utf-8")
         self.assertIn("Este campo es obligatorio.", body)
         self.assertNotIn("Field required", body)
+
+    def test_rf03_cors_origins_reads_env_or_falls_back_to_local_defaults(self):
+        with patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("CORS_ORIGINS", None)
+            defaults = _get_cors_origins()
+            self.assertIn("http://localhost:5173", defaults)
+
+        with patch.dict(
+            os.environ,
+            {"CORS_ORIGINS": "https://3-14-15-92.sslip.io/ , https://pgguardian.duckdns.org"},
+        ):
+            self.assertEqual(
+                _get_cors_origins(),
+                ["https://3-14-15-92.sslip.io", "https://pgguardian.duckdns.org"],
+            )
+
+    def test_rf03_health_check_uses_app_db_without_db_host_and_tiendadb_when_set(self):
+        fake_cur = MagicMock()
+        fake_cur.fetchone.return_value = ("PostgreSQL 16.0",)
+        fake_conn = MagicMock()
+        fake_conn.cursor.return_value.__enter__.return_value = fake_cur
+
+        with (
+            patch.dict(os.environ, {}, clear=False),
+            patch("api.main.connect_app_db", return_value=fake_conn) as mock_app_db,
+        ):
+            os.environ.pop("DB_HOST", None)
+            res = health_check()
+        self.assertEqual(res["status"], "ok")
+        self.assertEqual(res["target"], "app_db")
+        mock_app_db.assert_called_once()
+        fake_conn.close.assert_called_once()
+
+        def _fake_gen():
+            yield fake_conn
+
+        with (
+            patch.dict(os.environ, {"DB_HOST": "db"}),
+            patch("api.main.get_connection", side_effect=_fake_gen) as mock_tienda,
+        ):
+            res_local = health_check()
+        self.assertEqual(res_local["status"], "ok")
+        self.assertEqual(res_local["target"], "tiendadb")
+        mock_tienda.assert_called_once()
 
