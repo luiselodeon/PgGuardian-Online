@@ -22,6 +22,7 @@ from fastapi import FastAPI, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.concurrency import run_in_threadpool
 
+from api.auth import get_current_user
 from api.database import get_connection
 from api.schemas import FullScanResponse
 from services.analysis_store import init_app_db_schema
@@ -30,6 +31,7 @@ from services.scan_service import run_full_scan
 
 # Importar routers
 from api.routers import analyses as analyses_router
+from api.routers import auth as auth_router
 from api.routers import bloat as bloat_router
 from api.routers import config as config_router
 from api.routers import health as health_router
@@ -72,13 +74,15 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Registrar routers
+# Registrar routers (RF-02.5: detectores y análisis protegidos por sesión)
+protected = [Depends(get_current_user)]
 app.include_router(analyses_router.router)
-app.include_router(bloat_router.router)
-app.include_router(config_router.router)
-app.include_router(health_router.router)
-app.include_router(indexes_router.router)
-app.include_router(queries_router.router)
+app.include_router(auth_router.router)
+app.include_router(bloat_router.router, dependencies=protected)
+app.include_router(config_router.router, dependencies=protected)
+app.include_router(health_router.router, dependencies=protected)
+app.include_router(indexes_router.router, dependencies=protected)
+app.include_router(queries_router.router, dependencies=protected)
 
 
 @app.get("/api/health-check")
@@ -104,7 +108,10 @@ def health_check(conn=Depends(get_connection)):
 
 
 @app.get("/api/full-scan", response_model=FullScanResponse)
-def full_scan(conn=Depends(get_connection)):
+def full_scan(
+    conn=Depends(get_connection),
+    _current_user: dict = Depends(get_current_user),
+):
     """
     Ejecuta TODOS los detectores sobre la conexión fija local (TiendaDB)
     y devuelve un reporte consolidado con health score calculado.

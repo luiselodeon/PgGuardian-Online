@@ -41,10 +41,34 @@ CREATE INDEX IF NOT EXISTS idx_analyses_user_created
 CREATE INDEX IF NOT EXISTS idx_analyses_sandbox_expiry
     ON analyses (sandbox_status, sandbox_expires_at)
     WHERE sandbox_status = 'active';
+
+CREATE TABLE IF NOT EXISTS users (
+    id UUID PRIMARY KEY,
+    name VARCHAR(150) NOT NULL,
+    email VARCHAR(255) NOT NULL UNIQUE,
+    password_hash TEXT NOT NULL,
+    failed_login_attempts INTEGER NOT NULL DEFAULT 0,
+    locked_until TIMESTAMPTZ,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    CONSTRAINT chk_users_email_lowercase CHECK (email = LOWER(email))
+);
+ALTER TABLE users ADD COLUMN IF NOT EXISTS failed_login_attempts INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS locked_until TIMESTAMPTZ;
+
+CREATE TABLE IF NOT EXISTS sessions (
+    id UUID PRIMARY KEY,
+    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    expires_at TIMESTAMPTZ NOT NULL,
+    revoked_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_sessions_user_active
+    ON sessions (user_id, revoked_at, expires_at);
 """
 
 
-def _connect_app_db():
+def connect_app_db():
     """Conecta exclusivamente a app_db mediante variables APP_DB_*."""
     conn = psycopg2.connect(
         dbname=os.getenv("APP_DB_NAME", "pgguardian_app"),
@@ -58,8 +82,11 @@ def _connect_app_db():
     return conn
 
 
+_connect_app_db = connect_app_db
+
+
 def init_app_db_schema() -> None:
-    """Inicializa idempotentemente la tabla analyses e índices en app_db."""
+    """Inicializa idempotentemente las tablas e índices de app_db."""
     conn = _connect_app_db()
     try:
         with conn.cursor() as cur:

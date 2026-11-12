@@ -184,6 +184,17 @@
   min-width: 0;
 }
 
+.auth-checking-screen {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  background: var(--bg-primary);
+  color: var(--text-secondary);
+  font-size: 0.95rem;
+}
+
 /* Responsive */
 @media (max-width: 1024px) {
   .page-wrapper {

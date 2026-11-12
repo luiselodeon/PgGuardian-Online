@@ -1,27 +1,57 @@
 """
-PgGuardian — Dependencia de Identidad de Usuario (RF-01.8)
+PgGuardian — Dependencia de Autenticación y Sesión Activa (RF-02.5)
 
-Extrae el identificador de usuario de la petición actual para aplicar
-aislamiento multitenant sobre análisis mientras se integra el flujo completo
-de autenticación y sesiones de RF-02.
+Valida el JWT recibido por cookie HttpOnly (pgguardian_session) o cabecera
+Authorization Bearer y verifica que la sesión siga activa en app_db.
 """
 
-from fastapi import Cookie, Header, HTTPException, status
+from fastapi import Cookie, Depends, Header, HTTPException, status
+import psycopg2
+
+from security.sessions import SESSION_COOKIE_NAME, decode_access_token
+from services.user_store import get_active_session_user
+
+_AUTH_REQUIRED_DETAIL = "Sesión requerida o expirada. Inicia sesión para continuar."
 
 
-def get_current_user_id(
-    x_user_id: str | None = Header(default=None, alias="X-User-Id"),
-    session_user: str | None = Cookie(default=None, alias="pgguardian_user"),
-) -> str:
-    """
-    Obtiene y valida el identificador del usuario propietario de la sesión.
-    shortcut: lee cabecera X-User-Id o cookie pgguardian_user hasta integrar JWT/sessions en RF-02.
-    """
-    raw = (x_user_id or session_user or "").strip()
-    if not raw or len(raw) > 128 or any(ord(ch) < 32 for ch in raw):
+def _extract_bearer_token(authorization: str | None) -> str | None:
+    if not authorization:
+        return None
+    scheme, _, token = authorization.strip().partition(" ")
+    if scheme.lower() != "bearer" or not token:
+        return None
+    return token.strip()
+
+
+def get_current_user(
+    session_cookie: str | None = Cookie(default=None, alias=SESSION_COOKIE_NAME),
+    authorization: str | None = Header(default=None),
+) -> dict:
+    """Exige una sesión válida en cookie o Bearer token; responde 401 si falta."""
+    token = session_cookie or _extract_bearer_token(authorization)
+    claims = decode_access_token(token) if token else None
+    if not claims:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Sesión requerida: autentícate o envía un identificador de usuario válido.",
+            detail=_AUTH_REQUIRED_DETAIL,
         )
-    return raw
 
+    try:
+        user = get_active_session_user(claims["sid"], claims["sub"])
+    except psycopg2.Error as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="No se pudo validar la sesión en la base de datos.",
+        ) from exc
+
+    if user is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail=_AUTH_REQUIRED_DETAIL,
+        )
+    return user
+
+
+def get_current_user_id(current_user: dict = Depends(get_current_user)) -> str:
+    """Devuelve el UUID del usuario autenticado para aislamiento multitenant."""
+    return current_user["id"]

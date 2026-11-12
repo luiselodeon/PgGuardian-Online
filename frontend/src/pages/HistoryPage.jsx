@@ -81,7 +81,7 @@ export default function HistoryPage({ currentUser, refreshKey, onOpenTab, onDele
           : await getAnalysisDetail(analysisId)
       if (onOpenTab) {
         onOpenTab(detail)
-        navigate('/')
+        navigate('/dashboard')
       }
     } catch (err) {
       setError(err.message)
@@ -113,7 +113,8 @@ export default function HistoryPage({ currentUser, refreshKey, onOpenTab, onDele
         <div className="page-header">
           <h1 className="page-title">Historial de Análisis</h1>
           <p className="page-subtitle">
-            Reportes de scripts SQL pertenecientes a <code className="mono">{currentUser}</code>
+            Reportes de scripts SQL pertenecientes a{' '}
+            <code className="mono">{currentUser?.email || currentUser?.name || ''}</code>
           </p>
         </div>
         <button type="button" className="history-refresh-btn" onClick={handleRefresh} disabled={isLoading}>
