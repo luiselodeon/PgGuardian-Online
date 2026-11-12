@@ -17,6 +17,7 @@ bajo la carpeta de /api fueron normalizados con ayuda de la Inteligencia Artific
 import asyncio
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
+import os
 
 from fastapi import FastAPI, Depends, Request, status
 from fastapi.exceptions import RequestValidationError
@@ -28,7 +29,7 @@ from api.auth import get_current_user
 from api.database import get_connection
 from api.schemas import FullScanResponse
 from security.rate_limit import auth_rate_limiter, extract_client_ip
-from services.analysis_store import init_app_db_schema
+from services.analysis_store import connect_app_db, init_app_db_schema
 from services.sandbox_cleanup import sandbox_cleanup_loop
 from services.scan_service import run_full_scan
 
@@ -62,11 +63,23 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-origins = [
+_DEFAULT_CORS_ORIGINS = [
     "http://localhost:5173",    # Para seguir probando localmente
     "http://127.0.0.1:5173",
-    "https://pgguardian-frontend.onrender.com" 
+    "https://pgguardian-frontend.onrender.com",
 ]
+
+
+def _get_cors_origins() -> list[str]:
+    """Lee CORS_ORIGINS separado por comas (RF-03.5) o usa los orígenes locales."""
+    raw = os.getenv("CORS_ORIGINS", "").strip()
+    if not raw:
+        return list(_DEFAULT_CORS_ORIGINS)
+    parsed = [item.strip().rstrip("/") for item in raw.split(",") if item.strip()]
+    return parsed or list(_DEFAULT_CORS_ORIGINS)
+
+
+origins = _get_cors_origins()
 
 # Configuración de CORS
 app.add_middleware(
@@ -142,15 +155,25 @@ app.include_router(queries_router.router, dependencies=protected)
 
 
 @app.get("/api/health-check")
-def health_check(conn=Depends(get_connection)):
-    """Verifica que la API puede conectarse a PostgreSQL."""
+def health_check():
+    """Verifica conectividad con PostgreSQL (TiendaDB en local o app_db en producción)."""
+    conn_gen = None
+    conn = None
     try:
+        if os.getenv("DB_HOST"):
+            conn_gen = get_connection()
+            conn = next(conn_gen)
+            target = "tiendadb"
+        else:
+            conn = connect_app_db()
+            target = "app_db"
         with conn.cursor() as cur:
             cur.execute("SELECT version();")
             version = cur.fetchone()[0]
         return {
             "status": "ok",
             "database": "connected",
+            "target": target,
             "pg_version": version,
             "timestamp": datetime.now(timezone.utc).isoformat(),
         }
@@ -161,6 +184,11 @@ def health_check(conn=Depends(get_connection)):
             "error": str(e),
             "timestamp": datetime.now(timezone.utc).isoformat(),
         }
+    finally:
+        if conn_gen is not None:
+            conn_gen.close()
+        elif conn is not None:
+            conn.close()
 
 
 @app.get("/api/full-scan", response_model=FullScanResponse)
