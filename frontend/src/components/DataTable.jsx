@@ -1,6 +1,8 @@
 import React, { useState } from 'react'
 import SeverityBadge from './SeverityBadge'
 import SqlRecommendation from './SqlRecommendation'
+import RemediationPanel from './RemediationPanel'
+import { hasRemediationInfo } from '../utils/remediation'
 import './DataTable.css'
 
 export default function DataTable({ title, data, columns, emptyMessage }) {
@@ -61,9 +63,17 @@ export default function DataTable({ title, data, columns, emptyMessage }) {
     return String(value)
   }
 
+  const hiddenInExtra = new Set([
+    'sql_recommendation',
+    'sql_fix',
+    'sql_remediation',
+    'suggested_action',
+    'recommendation',
+    'remediation_steps',
+  ])
   const allKeys = data.length > 0 ? Object.keys(data[0]) : []
   const displayedKeys = cols.map(c => c.key)
-  const extraKeys = allKeys.filter(k => !displayedKeys.includes(k) && k !== 'sql_recommendation' && k !== 'sql_fix')
+  const extraKeys = allKeys.filter(k => !displayedKeys.includes(k) && !hiddenInExtra.has(k))
 
   return (
     <div className="data-table-container fade-in">
@@ -73,20 +83,22 @@ export default function DataTable({ title, data, columns, emptyMessage }) {
           <thead>
             <tr>
               {cols.map(col => (
-                <th 
-                  key={col.key}
+                <th key={col.key}
                   style={col.width ? { width: col.width, minWidth: col.width } : {}}
                 >
                   {col.label}
                 </th>
               ))}
-              {extraKeys.length > 0 && <th className="th-expand"></th>}
+              <th className="th-expand">Acciones</th>
             </tr>
           </thead>
           <tbody>
-            {data.map((row, i) => (
+            {data.map((row, i) => {
+              const showRemediation = hasRemediationInfo(row)
+              const isExpandable = showRemediation || extraKeys.length > 0
+              return (
               <React.Fragment key={i}>
-                <tr onClick={() => extraKeys.length > 0 && toggleRow(i)} className={extraKeys.length > 0 ? 'expandable' : ''}>
+                <tr onClick={() => isExpandable && toggleRow(i)} className={isExpandable ? 'expandable' : ''}>
                   {cols.map(col => (
                     <td 
                       key={col.key}
@@ -96,30 +108,49 @@ export default function DataTable({ title, data, columns, emptyMessage }) {
                       {renderCellValue(row[col.key], col.key, row)}
                     </td>
                   ))}
-                  {extraKeys.length > 0 && (
-                    <td className="td-expand">
-                      <span className={`expand-icon ${expandedRow === i ? 'expand-icon--open' : ''}`}>▸</span>
-                    </td>
-                  )}
+                  <td className="td-expand">
+                    {isExpandable && (
+                      <button
+                        type="button"
+                        className="row-guide-btn"
+                        aria-expanded={expandedRow === i}
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          toggleRow(i)
+                        }}
+                      >
+                        {showRemediation ? '¿Qué hacer?' : 'Detalle'}{' '}
+                        <span className={`expand-icon ${expandedRow === i ? 'expand-icon--open' : ''}`}>▸</span>
+                      </button>
+                    )}
+                  </td>
                 </tr>
-                {expandedRow === i && extraKeys.length > 0 && (
+                {expandedRow === i && isExpandable && (
                   <tr className="detail-row">
                     <td colSpan={cols.length + 1}>
-                      <div className="detail-content">
-                        {extraKeys.map(k => (
-                          <div key={k} className="detail-item">
-                            <span className="detail-label">{k.replace(/_/g, ' ')}</span>
-                            <span className={`detail-value ${k.includes('sql') || k.includes('query') ? 'mono' : ''}`}>
-                              {renderCellValue(row[k], k, row)}
-                            </span>
-                          </div>
-                        ))}
-                      </div>
+                      {showRemediation && (
+                        <div className="detail-remediation-wrap">
+                          <RemediationPanel finding={row} defaultOpen showHeaderSummary />
+                        </div>
+                      )}
+                      {extraKeys.length > 0 && (
+                        <div className="detail-content">
+                          {extraKeys.map(k => (
+                            <div key={k} className="detail-item">
+                              <span className="detail-label">{k.replace(/_/g, ' ')}</span>
+                              <span className={`detail-value ${k.includes('sql') || k.includes('query') ? 'mono' : ''}`}>
+                                {renderCellValue(row[k], k, row)}
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
                     </td>
                   </tr>
                 )}
               </React.Fragment>
-            ))}
+              )
+            })}
           </tbody>
         </table>
       </div>

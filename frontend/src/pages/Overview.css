@@ -11,6 +11,32 @@
   gap: 16px;
 }
 
+.overview-title-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.overview-source-pill {
+  font-size: 0.74rem;
+  font-weight: 700;
+  padding: 4px 10px;
+  border-radius: 999px;
+}
+
+.source--local {
+  background: rgba(16, 185, 129, 0.14);
+  color: var(--severity-ok);
+  border: 1px solid rgba(16, 185, 129, 0.25);
+}
+
+.source--sandbox {
+  background: rgba(59, 130, 246, 0.15);
+  color: var(--brand-light);
+  border: 1px solid rgba(59, 130, 246, 0.3);
+}
+
 .page-title {
   font-size: 1.8rem;
   font-weight: 700;

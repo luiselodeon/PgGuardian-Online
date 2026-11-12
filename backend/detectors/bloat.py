@@ -92,8 +92,18 @@ def check_table_bloat(conn):
 
     try:
         with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
-            # Primero ejecutamos la creacion de la extensión
-            cur.execute(setup_query)
+            # Instalar pgstattuple solo si falta y el rol actual tiene privilegios
+            cur.execute("SELECT EXISTS(SELECT 1 FROM pg_extension WHERE extname = 'pgstattuple') AS installed;")
+            if not cur.fetchone()['installed']:
+                try:
+                    if not conn.autocommit:
+                        cur.execute("SAVEPOINT sp_pgstattuple;")
+                    cur.execute(setup_query)
+                    if not conn.autocommit:
+                        cur.execute("RELEASE SAVEPOINT sp_pgstattuple;")
+                except psycopg2.Error:
+                    if not conn.autocommit:
+                        cur.execute("ROLLBACK TO SAVEPOINT sp_pgstattuple;")
             # Ejecutamos el query principal de bloat
             cur.execute(query)
             rows = cur.fetchall()

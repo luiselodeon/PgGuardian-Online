@@ -10,6 +10,7 @@ export default function SeverityBadge({ severity }) {
     LOW: { label: 'Baja', className: 'severity--low' },
     OK: { label: 'OK', className: 'severity--ok' },
     WARNING: { label: 'Warning', className: 'severity--medium' },
+    NO_APLICA: { label: 'No aplica', className: 'severity--na' },
   }
 
   const info = map[s] || map['OK']

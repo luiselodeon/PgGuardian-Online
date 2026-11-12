@@ -32,13 +32,16 @@ export default function CategoryCard({ categoryKey, category, onClick }) {
       </div>
 
       <div className="card-footer">
-        {Object.entries(detectors).map(([key, det]) => (
-          <div key={key} className="detector-pill">
-            <span className={`pill-dot ${det.count > 0 ? 'pill-dot--warn' : 'pill-dot--ok'}`}></span>
-            <span className="pill-label">{det.label}</span>
-            <span className="pill-count">{det.count}</span>
-          </div>
-        ))}
+        {Object.entries(detectors).map(([key, det]) => {
+          const isNa = det.status === 'no_aplica'
+          return (
+            <div key={key} className="detector-pill">
+              <span className={`pill-dot ${isNa ? 'pill-dot--na' : det.count > 0 ? 'pill-dot--warn' : 'pill-dot--ok'}`}></span>
+              <span className="pill-label">{det.label}</span>
+              <span className="pill-count">{isNa ? 'N/A' : det.count}</span>
+            </div>
+          )
+        })}
       </div>
     </div>
   )

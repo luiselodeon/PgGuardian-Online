@@ -2,3 +2,7 @@
 __pycache__/
 .venv/
 node_modules
+.agents
+.agent
+skills-lock.json
+/.archify

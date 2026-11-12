@@ -1,45 +1,5 @@
 import DataTable from '../components/DataTable'
-import SqlRecommendation from '../components/SqlRecommendation'
-import SeverityBadge from '../components/SeverityBadge'
 import './PageCommon.css'
-
-/**
- * Renderiza una lista de hallazgos tipo "finding" con evidencia y SQL.
- */
-function FindingBlock({ data, emptyMessage }) {
-  if (!data || data.length === 0) {
-    return <p className="finding-empty">{emptyMessage || 'Sin hallazgos detectados'}</p>
-  }
-  return (
-    <div className="finding-list">
-      {data.map((item, i) => (
-        <div key={i} className="finding-card">
-          <div className="finding-card-header">
-            <span className="finding-card-title">{item.title || 'Hallazgo'}</span>
-            {item.severity && <SeverityBadge severity={item.severity} />}
-          </div>
-          {item.evidence && (
-            <p className="finding-card-evidence">
-              <span className="rec-evidence-icon">◈</span> {item.evidence}
-            </p>
-          )}
-          {item.recommendation && (
-            <p className="finding-card-recommendation" style={{ marginTop: '0.5rem', fontSize: '0.875rem', color: 'var(--text-secondary)' }}>
-              <strong>Recomendación:</strong> {item.recommendation}
-            </p>
-          )}
-          {(item.query_sample || item.query) && (
-            <div className="finding-card-query" style={{ marginTop: '0.75rem', padding: '0.75rem', backgroundColor: 'var(--bg-tertiary)', borderRadius: '6px', fontFamily: 'monospace', fontSize: '0.85rem', color: 'var(--text-primary)', whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>
-              <strong>Query:</strong><br />
-              {item.query_sample || item.query}
-            </div>
-          )}
-          <SqlRecommendation sql={item.sql_recommendation || item.sql_fix} />
-        </div>
-      ))}
-    </div>
-  )
-}
 
 function QuerySection({ title, data, columns, emptyMessage }) {
   // Inyectamos la columna dinámicamente para que el SQL quede en la tabla

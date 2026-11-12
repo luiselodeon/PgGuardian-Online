@@ -111,6 +111,7 @@
 
 .pill-dot--ok { background: var(--severity-ok); }
 .pill-dot--warn { background: var(--severity-medium); }
+.pill-dot--na { background: var(--text-secondary); }
 
 .pill-label {
   flex: 1;

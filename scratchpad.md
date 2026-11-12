@@ -478,3 +478,212 @@ Assumed expected load: **1 to 5 concurrent administrators running diagnostic sca
 - **Lean Potential:** ~180 lines of duplicated code (repetitive `_serialize` declarations and duplicate config detectors) and 1 unused dependency can be eliminated immediately.
 - **Verification Note:** All 18 benchmark issues (H01–H18) have corresponding detection logic mapped, but generic resilience requires removing hardcoded filters (`usename = 'tienda_user'`) prior to testing against unexpected database environments.
 
+---
+
+## RF-01.1 y RF-01.2 - Registro de Cambios y Decisiones Técnicas
+
+### 1. Archivos Creados y Modificados
+
+#### Backend (FastAPI)
+- **`backend/requirements.txt`** *(modificado)*: Se agregó `python-multipart==0.0.20`, requerido por FastAPI/Starlette para procesar peticiones `multipart/form-data` con `UploadFile` y `Form`.
+- **`backend/api/schemas.py`** *(modificado)*: Se añadieron los modelos Pydantic `AnalysisFileSummary` y `AnalysisCreateResponse` para tipar la respuesta de `POST /api/analyses`.
+- **`backend/api/routers/analyses.py`** *(creado)*: Nuevo router con prefijo `/api/analyses` y endpoint `POST /api/analyses`, incluyendo las funciones de validación `_parse_execution_order` y `_read_and_validate_file`.
+- **`backend/api/main.py`** *(modificado)*: Se importó y montó `analyses_router.router` dentro de la aplicación FastAPI sin alterar los detectores ni endpoints existentes de TiendaDB.
+- **`backend/tests/test_analyses.py`** *(creado)*: Suite de pruebas unitarias con `unittest` (`IsolatedAsyncioTestCase`) que verifica carga válida, reordenamiento, rechazo por cantidad, extensión inválida, UTF-8 inválido, límites de peso (10 MB / 25 MB) y parámetro `order` malformado.
+
+#### Frontend (React 19 + Vite)
+- **`frontend/src/api/pgguardian.js`** *(modificado)*: Se agregó la función `createAnalysis(files, order)` que envía `FormData` vía `POST ${API_BASE}/analyses` y propaga el campo `detail` de errores HTTP en español.
+- **`frontend/src/components/NewAnalysisModal.jsx`** *(creado)*: Modal accesible con selector múltiple y drag-and-drop para archivos `.sql`, validación en cliente, lista reordenable (botones `Subir`/`Bajar` y arrastre de filas) y vista de resumen tras recibir `201 Created`.
+- **`frontend/src/components/NewAnalysisModal.css`** *(creado)*: Estilos del modal, dropzone, cola ordenada y tabla de resultados usando las variables de diseño existentes en `frontend/src/index.css`.
+- **`frontend/src/App.jsx`** *(modificado)*: Se incorporó el botón **«Nuevo análisis»** en la barra superior (`.top-bar-actions`) y el montaje condicional de `NewAnalysisModal`.
+- **`frontend/src/App.css`** *(modificado)*: Se agregó la clase `.new-analysis-button` alineada con la paleta y jerarquía visual de `.scan-button`.
+
+### 2. Decisiones Técnicas y Alineación Arquitectónica
+- **Desacoplamiento de `app_db` y `sandbox_db` (alcance RF-01.1 / RF-01.2):** Dado que la creación de tablas en `app_db` (RF-02) y la ejecución aislada en `sandbox_db` (RF-01.4) pertenecen a incrementos separados, `POST /api/analyses` valida los scripts en memoria y retorna `201 Created` con un identificador UUID temporal, estado `"validado"` y el resumen ordenado de los archivos, manteniendo intacta la compatibilidad con TiendaDB (RNF-05) y sin introducir dependencias de base de datos ni `pglast` (RF-01.3).
+- **Lectura por bloques (*streaming*) en FastAPI:** `_read_and_validate_file` lee cada `UploadFile` en fragmentos de 1 MB (`READ_CHUNK_BYTES`) acumulando el tamaño individual y total en curso. Esto evita cargar en memoria archivos sobredimensionados antes de rechazarlos con `413` y asegura el cierre de descriptores en un bloque `finally`.
+- **Preservación explícita del orden secuencial:** El endpoint recibe el parámetro opcional `order` como `Form` (arreglo JSON de índices base 0, o enteros separados por coma) además del orden del arreglo `files`. El frontend envía los archivos ya reordenados junto con `order = [0, 1, ...]` y el backend reasigna posiciones consecutivas `1..N` en la respuesta.
+- **Validación dual Cliente + Servidor en React:** El modal valida extensión `.sql`, límite de 5 archivos, ≤ 10 MB individuales y ≤ 25 MB acumulados antes de enviar; la validación estricta de codificación UTF-8 se ejecuta en el backend (además de revalidar tamaño, cantidad, extensión y orden en el límite de confianza), permitiendo feedback inmediato en UI sin ocultar rechazos `422` por codificación inválida.
+- **Sin dependencias externas nuevas en Frontend:** El reordenamiento usa estado nativo de React con controles de teclado/clic (`↑` / `↓`) y eventos HTML5 Drag-and-Drop, evitando librerías externas innecesarias.
+
+### 3. Reglas de Validación Aplicadas
+1. **Cantidad de archivos:** Mínimo `1` (`MIN_FILES = 1`) y máximo `5` (`MAX_FILES = 5`) por análisis.
+2. **Extensión:** Solo archivos con sufijo `.sql` (insensible a mayúsculas, verificando nombre base no vacío mediante `PurePosixPath(filename).suffix.lower() == ".sql"` en backend y comprobación equivalente en cliente).
+3. **Tamaño de archivo e impacto acumulado:**
+   - Individual: máximo `10 * 1024 * 1024` bytes (10 MB) por archivo (`MAX_FILE_SIZE_BYTES`).
+   - Combinado: máximo `25 * 1024 * 1024` bytes (25 MB) sumando todos los archivos de la petición (`MAX_TOTAL_SIZE_BYTES`).
+4. **Codificación UTF-8 estricta:** Decodificación estricta `raw_bytes.decode("utf-8")` sin reemplazo ni tolerancia de bytes inválidos.
+5. **Orden de ejecución:** El parámetro opcional `order` debe representar una permutación exacta y sin duplicados ni booleanos de `0 .. len(files) - 1`.
+
+### 4. Manejo de Errores y Códigos HTTP
+Todos los mensajes de error se devuelven en español bajo el campo estándar `detail` de FastAPI (cumpliendo RNF-04):
+- **`201 Created`:** Todos los archivos cumplen las reglas; devuelve `AnalysisCreateResponse` con `id`, `status: "validado"`, `message`, `file_count`, `total_size_bytes`, `files` (ordenados `1..N` con nombre, tamaño en bytes, codificación `"utf-8"` y conteo de líneas) y `created_at`.
+- **`400 Bad Request`:** Menos de 1 archivo o archivo sin nombre válido, más de 5 archivos, o parámetro `order` malformado, con longitud incompatible o índices inválidos/duplicados.
+- **`413 Content Too Large`:** Cualquier archivo supera 10 MB o el peso acumulado supera 25 MB.
+- **`422 Unprocessable Entity`:** Extensión distinta de `.sql` o contenido con bytes no decodificables en UTF-8 estricto.
+
+---
+
+## RF-01.3 y RF-01.4 - Registro de Implementación, Seguridad y Sandbox
+
+### 1. Archivos Creados y Modificados
+- **`.env`** *(modificado)*: Se añadieron las variables dedicadas para el servidor sandbox (`SANDBOX_DB_NAME`, `SANDBOX_DB_ADMIN_USER`, `SANDBOX_DB_ADMIN_PASSWORD`, `SANDBOX_DB_EXEC_USER`, `SANDBOX_DB_EXEC_PASSWORD`), desacopladas de `DB_*` (TiendaDB / `app_db`).
+- **`docker-compose.yml`** *(modificado)*: Se incorporó el servicio aislado `sandbox_db` (`postgres:16`, contenedor `pgguardian_sandboxdb`, volumen `sandbox_data`, sin puertos públicos expuestos ni scripts de `init/`), y se inyectaron las variables `SANDBOX_DB_*` y la dependencia `depends_on: sandbox_db (service_healthy)` en el servicio `api`.
+- **`backend/requirements.txt`** *(modificado)*: Se agregó `pglast==6.17` (parser nativo de PostgreSQL 16 vía `libpg_query`).
+- **`backend/services/__init__.py`** *(creado)*: Marcador de paquete para la capa de servicios del backend.
+- **`backend/services/sql_validator.py`** *(creado)*: Servicio de análisis estático AST con `pglast` (`validate_sql_script`, `validate_scripts`, `_SafetyVisitor`, `SqlValidationError`, `ParsedStatement`).
+- **`backend/services/sandbox_runner.py`** *(creado)*: Servicio de aprovisionamiento y ejecución aislada en `sandbox_db` (`execute_in_sandbox`, `_provision_sandbox_db`, `_ensure_unprivileged_role`, `_drop_sandbox_db`, `SandboxExecutionError`, `SandboxResult`).
+- **`backend/api/schemas.py`** *(modificado)*: Se extendió `AnalysisCreateResponse` con `sandbox_db_name`, `executed_statements` y `execution_time_ms`.
+- **`backend/api/routers/analyses.py`** *(modificado)*: Se integró la secuencia RF-01.1/01.2 → RF-01.3 (`validate_scripts`) → RF-01.4 (`run_in_threadpool(execute_in_sandbox, ...)`) antes de devolver `201 Created` (`status: "ejecutado"`).
+- **`frontend/src/api/pgguardian.js`** y **`frontend/src/components/NewAnalysisModal.jsx`** *(modificados)*: Soporte para formatear errores estructurados (`detail` con archivo y línea) y mostrar `sandbox_db_name`, `executed_statements` y `execution_time_ms` tras la ejecución.
+- **`backend/tests/test_sql_validator.py`** y **`backend/tests/test_sandbox_runner.py`** *(creados)* + **`backend/tests/test_analyses.py`** *(actualizado)*: Cobertura unitaria para reglas AST, aislamiento de configuración, fail-fast, limpieza y timeout de 120 s.
+
+### 2. Nodos de `pglast` Inspeccionados y Reglas AST (RF-01.3)
+El validador utiliza `pglast.parse_sql`, `pglast.parser.scan` (cálculo exacto de línea y fragmento omitiendo comentarios iniciales sin usar expresiones regulares) y `pglast.visitors.Visitor` sobre cada `RawStmt`:
+
+| Regla (`rule`) | Nodos AST de `pglast` inspeccionados | Condición de rechazo |
+|---|---|---|
+| `alter_system` | `AlterSystemStmt` | Rechazo incondicional (`ALTER SYSTEM SET/RESET`). |
+| `copy_program` / `copy_file` | `CopyStmt` | Rechazo cuando `is_program == True` o `filename is not None` (permite `COPY ... FROM STDIN`). |
+| `role_management` | `CreateRoleStmt`, `AlterRoleStmt`, `AlterRoleSetStmt`, `DropRoleStmt`, `GrantRoleStmt`, `VariableSetStmt` | Rechazo de creación/alteración/eliminación/asignación de roles y `SET ROLE` / `SET SESSION AUTHORIZATION`. |
+| `critical_privilege` | `GrantStmt`, `AlterOwnerStmt` | Rechazo sobre `OBJECT_DATABASE`, `OBJECT_TABLESPACE`, `OBJECT_FDW`, `OBJECT_FOREIGN_SERVER`, `OBJECT_PARAMETER_ACL` o esquemas del sistema (`pg_*`, `information_schema`). |
+| `database_management` | `CreatedbStmt`, `DropdbStmt`, `AlterDatabaseStmt`, `AlterDatabaseSetStmt`, `AlterDatabaseRefreshCollStmt`, `AlterOwnerStmt`, `RenameStmt` | Rechazo de cualquier creación, eliminación, cambio de dueño, renombrado o `ALTER DATABASE`. |
+| `system_object_management` | `CreateTableSpaceStmt`, `DropTableSpaceStmt`, `CreateFdwStmt`, `AlterFdwStmt`, `CreateForeignServerStmt`, `AlterForeignServerStmt`, `CreateUserMappingStmt`, `DropStmt` | Rechazo de tablespaces, wrappers/servidores externos y `DROP` sobre lenguajes/FDW/servidores. |
+| `disallowed_extension` | `CreateExtensionStmt`, `AlterExtensionStmt`, `AlterExtensionContentsStmt` | Bloqueo salvo que `extname` pertenezca a `ALLOWED_EXTENSIONS` (`uuid-ossp`, `pgcrypto`, `pg_trgm`, `citext`, `hstore`, `unaccent`, `btree_gin`, `btree_gist`). |
+| `untrusted_language` | `CreatePLangStmt`, `CreateFunctionStmt`, `DoStmt` | Rechazo de `CREATE LANGUAGE` y de funciones/bloques `DO` cuyo parámetro `language` no pertenezca a `ALLOWED_FUNCTION_LANGUAGES` (`sql`, `plpgsql`). |
+
+### 3. Aislamiento, Privilegios del Rol y Timeout de 120 s (RF-01.4)
+- **Desacoplamiento total:** `_get_sandbox_config()` lee exclusivamente `SANDBOX_DB_*` y nunca invoca `api.database.get_connection()` ni usa variables `DB_*`.
+- **Aprovisionamiento por análisis:** Se genera una base única `sandbox_<uuid_hex>` mediante la conexión administrativa (`SANDBOX_DB_ADMIN_USER`), se revoca el acceso `PUBLIC` sobre la base (`REVOKE ALL ON DATABASE ... FROM PUBLIC`) y, dado el endurecimiento de PostgreSQL 15/16 sobre el esquema `public`, se transfiere la propiedad del esquema `public` de esa base efímera al rol ejecutor.
+- **Control de privilegios:** `_ensure_unprivileged_role()` crea o reasegura `SANDBOX_DB_EXEC_USER` con `LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOREPLICATION`. La ejecución de scripts se realiza exclusivamente con una conexión independiente bajo ese rol hacia `sandbox_<uuid_hex>`.
+- **Timeout global de 120 s y fail-fast:** `execute_in_sandbox` mantiene un reloj monotónico (`deadline = start + 120s`) y ejecuta cada sentencia validada en orden calculando `remaining_ms = int((deadline - time.monotonic()) * 1000)` y aplicando `SET statement_timeout = %s` antes de cada sentencia (impidiendo evasiones mediante `SET statement_timeout = 0` en un script). Al primer error SQL o vencimiento del límite (`57014`), aborta de inmediato, cierra la conexión ejecutora y ejecuta `DROP DATABASE IF EXISTS <sandbox> WITH (FORCE)` para evitar bases huérfanas.
+
+### 4. Formato de Error Estructurado
+Ante fallos de sintaxis o AST (`422`), errores SQL en sandbox (`422`), timeout de 120 s (`408`) o indisponibilidad de `sandbox_db` (`503`), FastAPI devuelve el campo `detail` estructurado en español:
+```json
+{
+  "code": "SQL_AST_BLOCKED | SQL_SYNTAX_ERROR | SANDBOX_EXECUTION_ERROR | SANDBOX_TIMEOUT | SANDBOX_CONNECTION_ERROR",
+  "message": "Descripción contextualizada en español",
+  "filename": "archivo.sql",
+  "line": 12,
+  "rule": "alter_system",
+  "statement": "ALTER SYSTEM SET work_mem = '64MB'",
+  "pgcode": "42P01",
+  "pg_error": "Mensaje original de PostgreSQL (cuando aplica en ejecución)"
+}
+```
+
+---
+
+## RF-01.5 y RF-01.6 - Desacoplamiento de Conexión y Detectores N/A
+
+### 1. Archivos Creados y Modificados
+- **`backend/services/scan_service.py`** *(creado)*: Nuevo orquestador desacoplado [`run_full_scan(conn, is_sandbox: bool = False)`] junto con `_safe_run`, `_serialize`, `_not_applicable_detector` y la lógica de normalización del puntaje.
+- **`backend/services/sandbox_runner.py`** *(modificado)*: Se añadió `connect_sandbox_db(sandbox_db_name)` para abrir conexiones con el rol sin privilegios (`SANDBOX_DB_EXEC_USER`) directamente sobre la base temporal del análisis.
+- **`backend/detectors/bloat.py`** *(modificado)*: En `check_table_bloat(conn)`, la creación de la extensión `pgstattuple` ahora verifica previamente `pg_extension` y captura `psycopg2.Error` (usando `SAVEPOINT` si `autocommit=False`), evitando fallos bajo el rol `NOSUPERUSER` de `sandbox_db` sin alterar su ejecución en TiendaDB.
+- **`backend/detectors/health.py`** *(modificado)*: En `check_partitioning_candidates(conn)`, la instalación de `pg_partman` se protege verificando `pg_extension` y capturando `psycopg2.Error`, permitiendo ejecutar el diagnóstico estructural sobre `sandbox_db` sin requerir `pg_partman` ni superusuario.
+- **`backend/api/main.py`** *(modificado)*: Se eliminó la lógica duplicada del escaneo y `GET /api/full-scan` ahora delega a `run_full_scan(conn, is_sandbox=False)` inyectando `Depends(get_connection)` para preservar compatibilidad completa con TiendaDB (RNF-05).
+- **`backend/api/schemas.py`** *(modificado)*: Se añadieron los campos retrocompatibles `is_sandbox: bool = False`, `evaluated_detectors: int = 22` y `not_applicable_detectors: int = 0` a `FullScanResponse`, y el campo `scan: FullScanResponse` a `AnalysisCreateResponse`.
+- **`backend/api/routers/analyses.py`** *(modificado)*: Tras ejecutar los scripts en `sandbox_db`, invoca `_scan_sandbox(sandbox_res.sandbox_db_name)` mediante `connect_sandbox_db(...)` y `run_full_scan(sandbox_conn, is_sandbox=True)` (nunca usa `get_connection()`), devolviendo el reporte en `scan` (`status: "completado"`).
+- **`frontend/src/components/SeverityBadge.jsx` / `.css`**, **`CategoryCard.jsx` / `.css`** y **`NewAnalysisModal.jsx`** *(modificados)*: Soporte visual para severidad/estado `NO_APLICA` (`N/A` / `No aplica`) y visualización del `Health Score`, hallazgos y detectores activos vs. N/A en el resumen del modal.
+- **`backend/tests/test_scan_service.py`** *(creado)* y **`backend/tests/test_analyses.py`** *(actualizado)*: Pruebas unitarias de inyección de conexión sandbox, omisión de detectores N/A, normalización del score y no-regresión en modo producción.
+
+### 2. Firma y Estructura de `run_full_scan(conn, is_sandbox: bool = False)`
+- **Firma:** `run_full_scan(conn, is_sandbox: bool = False) -> FullScanResponse` en `backend/services/scan_service.py`.
+- **Inyección de conexión:** Todos los detectores reciben `conn` como primer argumento obligatorio (`check_*(conn)` / `evaluate_*(conn)`). En `GET /api/full-scan` se pasa la conexión de `get_connection()` con `is_sandbox=False`; en `POST /api/analyses` se pasa la conexión efímera de `connect_sandbox_db(sandbox_db_name)` con `is_sandbox=True`.
+- **Estructura retrocompatible del reporte:** Cada detector dentro de `categories[cat]["detectors"][key]` mantiene `label`, `count` y `data`, añadiendo `status` (`"ok"` | `"warning"` | `"no_aplica"`). Cuando es `"no_aplica"`, incluye `status_label: "No aplica"`, `reason` en español, `count: 0` (para no inflar contadores en UI) y una entrada descriptiva en `data` con `severity: "NO_APLICA"`.
+
+### 3. Detectores Catalogados como «no aplica» en `is_sandbox=True`
+Se excluyen de ejecución y penalización los 9 detectores en `SANDBOX_NOT_APPLICABLE_DETECTORS` por depender de tráfico en vivo o estadísticas acumuladas en `pg_stat_*`:
+1. `health.idle_in_transaction` (`pg_stat_activity`: sesiones activas / *idle in transaction*).
+2. `indexes.unused_indexes` (`pg_stat_user_indexes`: `idx_scan = 0` sin tráfico previo).
+3. `indexes.covering_candidates` (`pg_stat_statements`: consultas frecuentes candidatas a `INCLUDE`).
+4. `indexes.wildcard_searches` (`pg_stat_statements`: consultas ejecutadas con `LIKE '%...%'`).
+5. `queries.temp_spills` (`pg_stat_statements`: bloques temporales escritos por consulta).
+6. `queries.seq_scans` (`pg_stat_statements` + `EXPLAIN`: consultas top con *Seq Scan*).
+7. `queries.top_time_queries` (`pg_stat_statements`: consultas con mayor tiempo acumulado).
+8. `queries.db_temp_usage` (`pg_stat_database`: archivos temporales acumulados en BD).
+9. `queries.explain_spills` (`pg_stat_statements` + `EXPLAIN ANALYZE`: *sort/hash spills*).
+
+Justificación reportada en español: `"No aplica en bases sandbox recién creadas porque no cuentan con estadísticas acumuladas ni métricas de tráfico en vivo."`
+
+### 4. Fórmula Ajustada del Health Score (0–100)
+Cada uno de los 22 detectores ponderados posee su peso nominal en `_DETECTOR_WEIGHTS` (suma total `total_weight = 114`):
+- **Penalización activa (`active_penalty`):** Suma de `hallazgos * peso` exclusivamente sobre los detectores ejecutados (`key not in excluded`). Los 9 detectores `no_aplica` aportan `0` hallazgos y se omiten de `active_weight`.
+- **Normalización sobre detectores válidos (`active_weight`):**
+  $$\text{normalized\_penalty} = \text{round}\left(\text{active\_penalty} \times \frac{\text{total\_weight}}{\text{active\_weight}}\right)$$
+  $$\text{health\_score} = \max\big(0,\; \min(100,\; 100 - \text{normalized\_penalty})\big)$$
+- En modo sandbox (`is_sandbox=True`), `active_weight = 69` (13 detectores activos, 9 `no_aplica`). En modo TiendaDB (`is_sandbox=False`), `excluded` está vacío (`active_weight == total_weight == 114`), por lo que el factor de escala es `1.0` y el cálculo coincide exactamente con la fórmula original.
+
+### 5. Verificación de No-Regresión (TiendaDB)
+- `GET /api/full-scan` sigue operando con `Depends(get_connection)` (`is_sandbox=False`), ejecutando los 22 detectores y devolviendo el mismo contrato JSON (`health_score`, `total_findings`, `categories`, `executed_at`).
+- Los routers individuales existentes (`/api/bloat/*`, `/api/config/*`, `/api/health/*`, `/api/indexes/*`, `/api/queries/*`) permanecen intactos.
+
+---
+
+## RF-01.7 y RF-01.8 - Persistencia de Historial, Limpieza Sandbox y Control de Acceso
+
+### 1. Archivos Creados y Modificados
+- **`.env`** y **`docker-compose.yml`** *(modificados)*: Se añadió el servicio aislado `app_db` (`postgres:16`, contenedor `pgguardian_appdb`, volumen `pgguardian_app_data`, sin puertos públicos) junto con las variables `APP_DB_*` inyectadas en `api` (`depends_on: app_db`).
+- **`backend/services/analysis_store.py`** *(creado)*: Capa de acceso a `app_db` (`init_app_db_schema`, `insert_analysis`, `list_analyses_for_user`, `get_analysis_for_user`, `delete_analysis_for_user`, `find_expired_active_sandboxes`, `mark_sandbox_destroyed`).
+- **`backend/services/sandbox_cleanup.py`** *(creado)*: Recolector programado (`cleanup_expired_sandboxes`, `sandbox_cleanup_loop`) integrado al `lifespan` de FastAPI sin dependencias externas (Celery/Redis).
+- **`backend/services/sandbox_runner.py`** *(modificado)*: Se expuso `drop_sandbox_db(db_name)` para eliminar bases en `sandbox_db` con `DROP DATABASE IF EXISTS ... WITH (FORCE)`.
+- **`backend/api/auth.py`** *(creado)*: Dependencia `get_current_user_id` que exige identidad de usuario (`X-User-Id` o cookie `pgguardian_user`, respondiendo `401` si falta) lista para ser reemplazada por JWT/sesiones en RF-02.
+- **`backend/api/main.py`**, **`backend/api/schemas.py`** y **`backend/api/routers/analyses.py`** *(modificados)*: Se añadió el ciclo `lifespan` (esquema `app_db` + tarea periódica 24 h), campo opcional `name` en `POST /api/analyses`, y endpoints `GET /api/analyses`, `GET /api/analyses/{id}` y `DELETE /api/analyses/{id}`.
+- **`frontend/src/api/pgguardian.js`**, **`Sidebar.jsx` / `.css`**, **`NewAnalysisModal.jsx` / `.css`**, **`App.jsx`** y nueva vista **`frontend/src/pages/HistoryPage.jsx` / `.css`** *(creados/modificados)*: Campo de nombre en carga, ruta `/history` con tabla histórica (`nombre`, `fecha`, `health score`, `estado sandbox`, detalle y borrado) y selector temporal de sesión activa (`usuario_a`, `usuario_b`, `usuario_c`).
+- **`backend/tests/test_analyses_lifecycle.py`** *(creado)* y **`backend/tests/test_analyses.py`** *(actualizado)*: Cobertura unitaria de `401`, aislamiento `user_a` vs `user_b` con `404` (CA-03), lectura de reportes tras purga del sandbox y limpieza de sandboxes vencidos.
+
+### 2. Estrategia de Ciclo de Vida y Purga a las 24 Horas (RF-01.7)
+- Al completar `POST /api/analyses`, se registra `sandbox_status = 'active'` y `sandbox_expires_at = created_at + 24 horas`.
+- En el arranque (`lifespan` de FastAPI) y cada 300 segundos (`SANDBOX_CLEANUP_INTERVAL_SECONDS`), `sandbox_cleanup_loop` ejecuta `cleanup_expired_sandboxes()`:
+  1. Consulta en `app_db` las filas con `sandbox_status = 'active' AND sandbox_expires_at <= NOW()`.
+  2. Ejecuta `DROP DATABASE IF EXISTS "<sandbox_db_name>" WITH (FORCE)` en `sandbox_db` (cerrando conexiones activas).
+  3. Actualiza únicamente `sandbox_status = 'destroyed'` y `sandbox_destroyed_at = NOW()` en `app_db`, preservando íntegros `name`, `created_at`, `health_score`, `total_findings`, `files_json` y `scan_json`.
+- Al consultar `GET /api/analyses/{id}` después de las 24 h, el endpoint lee exclusivamente desde `app_db` sin intentar conectarse a `sandbox_db`, mostrando el reporte completo junto con el estado `"destroyed"`.
+- Al ejecutar `DELETE /api/analyses/{id}`, además de borrar el registro en `app_db`, si `sandbox_status == 'active'` se purga inmediatamente la base temporal en `sandbox_db`.
+
+### 3. Modelo Desacoplado en `app_db`
+Tabla `analyses` en `app_db`:
+- **Identidad y propiedad:** `id UUID PRIMARY KEY`, `user_id VARCHAR(128) NOT NULL`, `name VARCHAR(200) NOT NULL`, índice compuesto `(user_id, created_at DESC)`.
+- **Estado del ciclo sandbox (sin credenciales):** `sandbox_db_name VARCHAR(63)`, `sandbox_status VARCHAR(20)`, `sandbox_expires_at TIMESTAMPTZ`, `sandbox_destroyed_at TIMESTAMPTZ`, índice parcial `(sandbox_status, sandbox_expires_at) WHERE sandbox_status = 'active'`. Nunca se almacenan usuarios, contraseñas ni cadenas de conexión de `sandbox_db`.
+- **Snapshot permanente del reporte:** `status`, `message`, `file_count`, `total_size_bytes`, `files_json JSONB`, `executed_statements`, `execution_time_ms`, `health_score`, `total_findings`, `scan_json JSONB`, `created_at`.
+
+### 4. Autorización Multitenant y Respuestas `404` (RF-01.8 / CA-03)
+- Todos los endpoints `/api/analyses*` dependen de `get_current_user_id` (`401` si no hay sesión/cabecera válida).
+- `GET /api/analyses` filtra estrictamente con `WHERE user_id = %s`.
+- `GET /api/analyses/{id}` y `DELETE /api/analyses/{id}` validan formato UUID y ejecutan consultas con `WHERE id = %s AND user_id = %s`. Si el registro no existe, el UUID es inválido o pertenece a otro usuario, devuelven indistintamente `404 Not Found` (`{"detail": "Análisis no encontrado."}`), evitando enumeración de IDs o fuga de metadatos entre inquilinos.
+
+---
+
+## Frontend - Dashboard Multi-pestaña y Guía de Remediación de Hallazgos
+
+### 1. Archivos Creados y Modificados
+- **`backend/services/scan_service.py`** *(modificado)*: Se añadió el catálogo `_REMEDIATION_CATALOG`, `_resolve_severity` y `_enrich_detector_rows` dentro de `_evaluated_detector` para normalizar de forma retrocompatible `title`, `category`, `severity`, `recommendation`, `remediation_steps` y `sql_remediation` en todos los hallazgos de `/api/full-scan` y `/api/analyses/{id}`.
+- **`backend/tests/test_scan_service.py`** *(modificado)*: Se añadió la prueba `test_enriches_findings_with_remediation_guide_and_severity`.
+- **`frontend/src/components/AnalysisTabs.jsx` / `.css`** *(creados)*: Barra horizontal responsiva de pestañas que muestra la pestaña persistente **TiendaDB (Local)** y pestañas dinámicas cerrables por cada análisis sandbox o histórico abierto, con badge de origen (`Local` / `Sandbox` / `Historial`) y su `Health Score`.
+- **`frontend/src/components/RemediationPanel.jsx` / `.css`** y **`frontend/src/utils/remediation.js`** *(creados)*: Panel expandible reutilizable («¿Qué hacer? — Acciones sugeridas») que presenta resumen, diagnóstico, recomendación, lista de pasos `remediation_steps` y snippet SQL copiable (`SqlRecommendation`), junto con el helper `hasRemediationInfo`.
+- **`frontend/src/components/FindingList.jsx` / `.css`** *(creados)*: Componente compartido para listas de hallazgos tipo tarjeta con etiqueta de categoría, severidad y `RemediationPanel` expandible (elimina la duplicación de `FindingBlock` en `ConfigPage.jsx`, `HealthPage.jsx` y `QueriesPage.jsx`).
+- **`frontend/src/components/DataTable.jsx` / `.css`** *(modificados)*: Se añadió botón explícito **«¿Qué hacer?»** por fila y renderizado integrado de `RemediationPanel` al expandir cualquier hallazgo en tablas (`BloatPage`, `HealthPage`, `IndexesPage`, `QueriesPage`).
+- **`frontend/src/pages/Overview.jsx` / `.css`**, **`HistoryPage.jsx` / `.css`** y **`NewAnalysisModal.jsx`** *(modificados)*: `Overview` muestra el origen activo (`TiendaDB (Local · init/)` vs `Sandbox`) y conteo dinámico de detectores activos/N/A; `HistoryPage` añade botón **«Abrir pestaña»** y paneles de remediación en el detalle; `NewAnalysisModal` incorpora el botón **«Ver pestaña en Dashboard»**.
+- **`frontend/src/App.jsx`** *(modificado)*: Gestiona el estado multianálisis (`tabs`, `activeTabId`), `openSandboxTab`, `closeTab` y mantiene aislado el auto-refresh (30 s) sobre la pestaña local `tiendadb-local`.
+
+### 2. Modelo de Datos para Remediación de Hallazgos
+Cada fila dentro de `categories[cat].detectors[det].data` expone de manera uniforme en `/api/full-scan` y `/api/analyses/{id}` (preservando las columnas originales para retrocompatibilidad):
+- `title` (`string`): Resumen corto del hallazgo en español.
+- `category` (`string`): Categoría operacional del detector.
+- `severity` (`"HIGH" | "MEDIUM" | "LOW" | "OK" | "NO_APLICA"`): Severidad normalizada (evaluada por umbrales en `table_bloat` y `dead_tuples`, o catálogo del detector).
+- `evidence` (`string`): Diagnóstico puntual observado en la base.
+- `recommendation` (`string`): Explicación práctica de «¿Qué hacer?».
+- `remediation_steps` (`string[]`): Lista ordenada de acciones correctivas sugeridas.
+- `sql_remediation` (`string`, opcional): Sentencia SQL sugerida (`CREATE INDEX CONCURRENTLY`, `ALTER TABLE ... RESET (autovacuum_enabled)`, `ANALYZE`, `ALTER SYSTEM`, etc.), sincronizada con `sql_recommendation` / `sql_fix`.
+
+### 3. Flujo de Interacción entre `TiendaDB (Local)` y Bases Sandbox
+1. Al cargar la aplicación, `App.jsx` inicializa la pestaña no cerrable `tiendadb-local` («TiendaDB (Local)») mediante `GET /api/full-scan`. El auto-refresh de 30 s actualiza únicamente esa pestaña en segundo plano.
+2. Al completar un análisis en `NewAnalysisModal` (`POST /api/analyses`) o pulsar **«Abrir pestaña»** en `/history` (`GET /api/analyses/{id}`), `openSandboxTab(analysis)` agrega (o enfoca si ya existe) una pestaña dinámica con el `scan` ya cargado en memoria sin volver a consultar la API.
+3. Al alternar entre pestañas desde `AnalysisTabs`, `Overview`, `Sidebar` y las páginas de categorías (`Bloat`, `Configuración`, `Salud`, `Índices`, `Queries`) consumen `activeTab.scanData` instantáneamente.
+4. Cerrar una pestaña temporal elimina únicamente su entrada de la lista de pestañas de la sesión React sin borrar el reporte guardado en `app_db` (mientras que eliminar un análisis desde `/history` sí cierra su pestaña abierta si existiera).
+
+
+
+
+
+

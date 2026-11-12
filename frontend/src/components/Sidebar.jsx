@@ -1,4 +1,3 @@
-import { useState } from 'react'
 import { NavLink } from 'react-router-dom'
 import Logo from '../assets/Logo.png'
 import './Sidebar.css'
@@ -8,6 +7,11 @@ const navItems = [
     path: '/',
     label: 'Overview',
     description: 'Resumen general',
+  },
+  {
+    path: '/history',
+    label: 'Historial',
+    description: 'Análisis de scripts SQL',
   },
   {
     path: '/bloat',
@@ -36,7 +40,7 @@ const navItems = [
   },
 ]
 
-export default function Sidebar({ scanData }) {
+export default function Sidebar({ scanData, currentUser, onUserChange }) {
   const getCategoryCount = (category) => {
     if (!scanData?.categories?.[category]) return null
     const cat = scanData.categories[category]
@@ -94,6 +98,21 @@ export default function Sidebar({ scanData }) {
       </nav>
 
       <div className="sidebar-footer">
+        {onUserChange && (
+          <label className="sidebar-user-picker">
+            <span className="user-picker-label">Sesión activa</span>
+            <select
+              className="user-picker-select"
+              value={currentUser}
+              onChange={(e) => onUserChange(e.target.value)}
+              aria-label="Seleccionar usuario activo"
+            >
+              <option value="usuario_a">usuario_a</option>
+              <option value="usuario_b">usuario_b</option>
+              <option value="usuario_c">usuario_c</option>
+            </select>
+          </label>
+        )}
         <div className="sidebar-status">
           <span className={`status-dot ${scanData ? 'status-dot--connected' : 'status-dot--disconnected'}`}></span>
           <span className="status-text">

@@ -3,7 +3,7 @@ import HealthScore from '../components/HealthScore'
 import CategoryCard from '../components/CategoryCard'
 import './Overview.css'
 
-export default function Overview({ scanData, isLoading, lastScan }) {
+export default function Overview({ scanData, isLoading, lastScan, activeTab }) {
   const navigate = useNavigate()
 
   const routeMap = {
@@ -14,16 +14,30 @@ export default function Overview({ scanData, isLoading, lastScan }) {
     queries: '/queries',
   }
 
+  const isSandbox = Boolean(scanData?.is_sandbox || activeTab?.kind === 'sandbox')
+  const tabTitle = activeTab?.label || 'TiendaDB (Local)'
+  const activeDetectors = scanData?.evaluated_detectors ?? (scanData?.categories ? 22 : '—')
+  const naDetectors = scanData?.not_applicable_detectors ?? 0
+
   return (
     <div className="overview-page">
       <div className="overview-header">
         <div>
-          <h1 className="page-title">Dashboard</h1>
-          <p className="page-subtitle">Resumen de salud de la base de datos</p>
+          <div className="overview-title-row">
+            <h1 className="page-title">Dashboard</h1>
+            <span className={`overview-source-pill ${isSandbox ? 'source--sandbox' : 'source--local'}`}>
+              {isSandbox ? `Sandbox: ${tabTitle}` : 'TiendaDB (Local · init/)'}
+            </span>
+          </div>
+          <p className="page-subtitle">
+            {isSandbox
+              ? 'Resumen de análisis ejecutado desde scripts SQL aislados'
+              : 'Resumen de salud de la base de datos local'}
+          </p>
         </div>
         {lastScan && (
           <div className="last-scan-info">
-            <span className="last-scan-label">Último escaneo</span>
+            <span className="last-scan-label">{isSandbox ? 'Analizado' : 'Último escaneo'}</span>
             <span className="last-scan-time">{new Date(lastScan).toLocaleString('es-MX')}</span>
           </div>
         )}
@@ -51,9 +65,11 @@ export default function Overview({ scanData, isLoading, lastScan }) {
             </div>
             <div className="hero-stat">
               <span className="hero-stat-value">
-                {scanData?.categories ? 22 : '—'}
+                {activeDetectors}
               </span>
-              <span className="hero-stat-label">Detectores</span>
+              <span className="hero-stat-label">
+                {naDetectors > 0 ? `Detectores (${naDetectors} N/A)` : 'Detectores'}
+              </span>
             </div>
           </div>
         </div>

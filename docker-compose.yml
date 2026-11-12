@@ -67,9 +67,57 @@ services:
       DB_PASSWORD: ${DB_PASSWORD}
       DB_HOST: db
       DB_PORT: 5432
+      APP_DB_HOST: app_db
+      APP_DB_PORT: 5432
+      APP_DB_NAME: ${APP_DB_NAME}
+      APP_DB_USER: ${APP_DB_USER}
+      APP_DB_PASSWORD: ${APP_DB_PASSWORD}
+      SANDBOX_DB_HOST: sandbox_db
+      SANDBOX_DB_PORT: 5432
+      SANDBOX_DB_NAME: ${SANDBOX_DB_NAME}
+      SANDBOX_DB_ADMIN_USER: ${SANDBOX_DB_ADMIN_USER}
+      SANDBOX_DB_ADMIN_PASSWORD: ${SANDBOX_DB_ADMIN_PASSWORD}
+      SANDBOX_DB_EXEC_USER: ${SANDBOX_DB_EXEC_USER}
+      SANDBOX_DB_EXEC_PASSWORD: ${SANDBOX_DB_EXEC_PASSWORD}
     depends_on:
       db:
         condition: service_healthy
+      app_db:
+        condition: service_healthy
+      sandbox_db:
+        condition: service_healthy
+
+  app_db:
+    image: postgres:16
+    container_name: pgguardian_appdb
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${APP_DB_NAME}
+      POSTGRES_USER: ${APP_DB_USER}
+      POSTGRES_PASSWORD: ${APP_DB_PASSWORD}
+    volumes:
+      - app_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${APP_DB_USER} -d ${APP_DB_NAME}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  sandbox_db:
+    image: postgres:16
+    container_name: pgguardian_sandboxdb
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${SANDBOX_DB_NAME}
+      POSTGRES_USER: ${SANDBOX_DB_ADMIN_USER}
+      POSTGRES_PASSWORD: ${SANDBOX_DB_ADMIN_PASSWORD}
+    volumes:
+      - sandbox_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${SANDBOX_DB_ADMIN_USER} -d ${SANDBOX_DB_NAME}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
 
   frontend:
     build:
@@ -85,3 +133,7 @@ services:
 volumes:
   tienda_data:
     name: tiendadb_data
+  app_data:
+    name: pgguardian_app_data
+  sandbox_data:
+    name: pgguardian_sandbox_data
