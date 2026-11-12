@@ -682,6 +682,195 @@ Cada fila dentro de `categories[cat].detectors[det].data` expone de manera unifo
 3. Al alternar entre pestañas desde `AnalysisTabs`, `Overview`, `Sidebar` y las páginas de categorías (`Bloat`, `Configuración`, `Salud`, `Índices`, `Queries`) consumen `activeTab.scanData` instantáneamente.
 4. Cerrar una pestaña temporal elimina únicamente su entrada de la lista de pestañas de la sesión React sin borrar el reporte guardado en `app_db` (mientras que eliminar un análisis desde `/history` sí cierra su pestaña abierta si existiera).
 
+---
+
+## RF-02.1, RF-02.2 y RF-02.3 - Registro de Usuarios y Criptografía Argon2id
+
+### 1. Archivos Creados y Modificados
+
+#### Backend (FastAPI + PostgreSQL `app_db`)
+- **`backend/requirements.txt`** *(modificado)*: Se agregó `argon2-cffi==25.1.0` para el hashing y verificación Argon2id en formato PHC.
+- **`backend/security/__init__.py`** *(creado)*: Marcador de paquete para utilidades criptográficas y políticas de contraseñas.
+- **`backend/security/hashing.py`** *(creado)*: Configuración de `PASSWORD_HASHER` (`argon2.PasswordHasher`) con `Type.ID` y funciones `hash_password(password)` y `verify_password(password, password_hash)`.
+- **`backend/security/common_passwords.txt`** *(creado)*: Catálogo de contraseñas comunes proveniente de SecLists (`xato-net-10-million-passwords-100000.txt`, 96,517 entradas únicas normalizadas en minúsculas).
+- **`backend/security/password_policy.py`** *(creado)*: Funciones `normalize_email`, `load_common_passwords`, `is_common_password` y `validate_password_policy` con mensajes de validación en español (RNF-04).
+- **`backend/services/analysis_store.py`** *(modificado)*: Se expuso `connect_app_db` (conservando el alias `_connect_app_db`) y se incorporó la tabla `users` en `_SCHEMA_DDL` ejecutado por `init_app_db_schema()` durante el `lifespan` de FastAPI.
+- **`backend/services/user_store.py`** *(creado)*: Capa de persistencia desacoplada sobre `app_db` con `EmailAlreadyExistsError`, `get_user_by_email(email)` y `create_user(name, email, password_hash)` (captura colisiones `UniqueViolation` y nunca devuelve `password_hash` tras el registro).
+- **`backend/api/schemas.py`** *(modificado)*: Se agregaron `UserRegisterRequest` (con `@field_validator` / `@model_validator` en español) y `UserRegisterResponse` (`id`, `name`, `email`, `created_at`, `message`).
+- **`backend/api/routers/auth.py`** *(creado)*: Router `/api/auth` con `POST /api/auth/register` (`201 Created` al registrar, `409 Conflict` si el correo ya existe, `503 Service Unavailable` si falla `app_db`).
+- **`backend/api/main.py`** *(modificado)*: Se registró `auth_router.router` en la aplicación FastAPI.
+- **`backend/tests/test_auth_register.py`** *(creado)*: Suite unitaria (`Argon2HashingTests`, `PasswordPolicyTests`, `RegisterEndpointTests`) para parámetros OWASP, CA-04, lista ≥ 10,000 contraseñas comunes, validaciones Pydantic y respuestas HTTP `409`/`503`.
+
+#### Frontend (React 19 + Vite)
+- **`frontend/src/api/pgguardian.js`** *(modificado)*: Se actualizó `extractApiError` para formatear arreglos `detail` de Pydantic (`422`) en español y se agregó `registerUser(payload)` hacia `POST /api/auth/register`.
+- **`frontend/src/pages/RegisterPage.jsx`** y **`frontend/src/pages/RegisterPage.css`** *(creados)*: Vista accesible de registro en español con campos de nombre, correo, contraseña, confirmación, botón `Mostrar`/`Ocultar` y lista de verificación en vivo (longitud 12–128, exclusión del correo/parte local, coincidencia exacta de confirmación y formato de correo).
+- **`frontend/src/App.jsx`** y **`frontend/src/App.css`** *(modificados)*: Se montó la ruta `/register` y el botón **«Crear cuenta»** en `.top-bar-actions`, actualizando `handleSelectTab` para regresar a `/` al seleccionar una pestaña desde `/register`.
+
+### 2. Esquema de la Tabla `users` en `app_db`
+Definida en `_SCHEMA_DDL` (`backend/services/analysis_store.py`) e inicializada idempotentemente en `app_db` vía `APP_DB_*` (sin acceso a `sandbox_db` ni a TiendaDB `DB_*`):
+- `id UUID PRIMARY KEY`
+- `name VARCHAR(150) NOT NULL`
+- `email VARCHAR(255) NOT NULL UNIQUE` (normalizado con `.strip().lower()` y protegido adicionalmente con `CONSTRAINT chk_users_email_lowercase CHECK (email = LOWER(email))`)
+- `password_hash TEXT NOT NULL` (cadena PHC Argon2id; nunca texto plano)
+- `created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()`
+- `updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()`
+
+### 3. Parámetros de Argon2id y Justificación OWASP (RF-02.3 / CA-04)
+En `backend/security/hashing.py`, `PASSWORD_HASHER` utiliza `argon2-cffi` con:
+- **`type=Type.ID` (Argon2id)**: Variante recomendada por OWASP Password Storage Cheat Sheet por combinar resistencia frente a ataques de canal lateral (Argon2i) y frente a cracking con GPU/ASIC (Argon2d).
+- **`memory_cost=19456` (19 MiB)**: Cumple el umbral mínimo recomendado por OWASP para Argon2id con `t=2` y `p=1` (19,456 KiB).
+- **`time_cost=2`**: Mínimo de 2 iteraciones requerido por OWASP a 19 MiB.
+- **`parallelism=1`**: 1 hilo por operación, alineado con el perfil base OWASP y evitando contención de hilos bajo concurrencia.
+- **`salt_len=16`** y **`hash_len=32`**: Sal aleatoria criptográfica de 16 bytes generada automáticamente por `argon2-cffi` y digest de 32 bytes codificado en formato PHC estándar (`$argon2id$v=19$m=19456,t=2,p=1$<salt>$<hash>`).
+- Cumplimiento **CA-04**: `hash_password` verifica el prefijo `$argon2id$`, `verify_password` rechaza cualquier hash que no inicie con `$argon2id$` y `UserRegisterResponse` excluye por diseño `password_hash`.
+
+### 4. Carga y Verificación de Contraseñas Comunes (≥ 10,000)
+- `backend/security/common_passwords.txt` contiene 100,000 líneas de credenciales filtradas (96,517 entradas únicas tras normalizar con `.strip().lower()`).
+- `load_common_passwords()` en `backend/security/password_policy.py` utiliza `@lru_cache(maxsize=1)` para leer el archivo una sola vez por proceso en un `frozenset[str]` de búsqueda O(1) en memoria (verificando en tiempo de carga que existan ≥ 10,000 entradas únicas).
+- `is_common_password(password)` compara tanto `password.lower()` como `password.strip().lower()` contra el `frozenset` para rechazar variaciones de mayúsculas/minúsculas o espacios periféricos.
+
+### 5. Verificación y Pruebas Ejecutadas (CA-04)
+- **Pruebas unitarias (`docker exec pgguardian_api python -m unittest discover -s tests -v`)**: 44 pruebas ejecutadas y aprobadas (`OK` en 0.517 s), incluyendo las 12 pruebas nuevas de `backend/tests/test_auth_register.py` que validan parámetros OWASP exactos, sal de 16 bytes distinta por invocación, ausencia de texto plano en `password_hash` (CA-04), verificación positiva/negativa, dataset ≥ 10,000 entradas, políticas de longitud/coincidencia/correo y respuestas `409`/`503`.
+- **Validación en vivo contra `pgguardian_api` y `pgguardian_appdb`**:
+  - `\d users` en `pgguardian_appdb` confirmó la tabla y restricciones (`users_email_key`, `chk_users_email_lowercase`).
+  - `POST http://localhost:8000/api/auth/register` devolvió `422` con mensajes en español para contraseña corta, coincidencia con correo/parte local y discordancia en confirmación; `201 Created` para registro válido normalizando `email` a minúsculas; y `409 Conflict` al reintentar el mismo correo.
+  - Consulta directa en `app_db` confirmó `password_hash` iniciando con `$argon2id$v=19$m=19456,t=2,p=1$` sin contener la contraseña en texto plano (CA-04). El registro temporal de prueba fue eliminado tras la verificación.
+- **Frontend (`pgguardian_frontend`)**: `npx eslint src/App.jsx src/api/pgguardian.js src/pages/RegisterPage.jsx` y `npm run build` completaron sin errores; `GET http://localhost:5173/register` respondió HTTP `200`. (Nota: `npm run lint` global sobre todo `frontend/` reporta un error preexistente ajeno a este cambio en `src/components/CategoryCard.jsx` línea 5 por `categoryKey` sin usar).
+
+---
+
+## Frontend - Landing Page de Acceso Obligatorio y Rutas Protegidas
+
+*(Incluye la integración completa en backend de RF-02.4, RF-02.5 y RF-02.6 para soportar sesiones reales con cookie `HttpOnly` y bloqueo por intentos fallidos).*
+
+### 1. Componentes Creados y Modificados en React y Backend
+
+#### Frontend (React 19 + Vite)
+- **`frontend/src/pages/AuthLandingPage.jsx`** y **`AuthLandingPage.css`** *(creados; reemplazan a `RegisterPage.jsx`/`.css`)*: Landing page pública en español que presenta el propósito de PgGuardian (auditoría automatizada de PostgreSQL por scripts SQL y diagnóstico en 5 pilares) junto con selector de pestañas accesible (`role="tablist"`) para alternar entre:
+  - **Iniciar sesión (RF-02.4):** formulario con correo, contraseña, botón `Mostrar`/`Ocultar`, estado de carga (`Ingresando…`) y bloqueo de controles durante el envío.
+  - **Crear cuenta (RF-02.1 / RF-02.2):** formulario con nombre, correo, contraseña ($\ge 12$ caracteres), confirmación y checklist de requisitos en vivo.
+- **`frontend/src/components/ProtectedRoute.jsx`** *(creado)*: Guardián de rutas que muestra la pantalla de verificación (`Verificando sesión…`) mientras se resuelve la sesión inicial, redirige con `<Navigate to="/" replace />` cuando no hay usuario autenticado y renderiza las vistas protegidas cuando la sesión es válida.
+- **`frontend/src/api/pgguardian.js`** *(modificado)*: Se eliminó el identificador temporal `localStorage` (`X-User-Id`), se activó `credentials: 'include'` en todas las peticiones `fetch`, se añadió `setUnauthorizedHandler` para limpiar la sesión ante cualquier respuesta `401`, mensajes claros ante fallos de conexión con el backend y se incorporaron `getCurrentUser`, `loginUser`, `logoutUser` y `changePassword`.
+- **`frontend/src/App.jsx`** y **`App.css`** *(modificados)*: Reestructuración completa del enrutamiento:
+  - `/` y `/register` renderizan `AuthLandingPage` (pestaña `login` o `register`) si no hay sesión activa, o redirigen automáticamente a `/dashboard` si ya existe sesión.
+  - `/dashboard`, `/history`, `/bloat`, `/config`, `/health`, `/indexes` y `/queries` quedan encapsulados dentro de `ProtectedRoute` (cualquier ruta desconocida redirige a `/dashboard` si hay sesión o a `/` si no la hay).
+  - El escaneo inicial (`fullScan()`) y el intervalo `POLL_INTERVAL` (30 s) solo se ejecutan cuando `user !== null`.
+- **`frontend/src/components/Sidebar.jsx`**, **`Sidebar.css`**, **`frontend/src/components/ChangePasswordModal.jsx`** y **`frontend/src/pages/HistoryPage.jsx`** *(creado/modificados)*: `Overview` apunta a `/dashboard`; se reemplazó el selector temporal `usuario_a`/`usuario_b`/`usuario_c` por el nombre y correo del usuario autenticado con botones **«Cambiar contraseña»** (`ChangePasswordModal`, RF-02.6) y **«Cerrar sesión»**; `HistoryPage` navega a `/dashboard` al abrir pestañas.
+
+#### Backend (RF-02.4, RF-02.5 y RF-02.6)
+- **`backend/requirements.txt`**, **`.env`** y **`docker-compose.yml`** *(modificados)*: Se añadió `PyJWT==2.15.1` y la variable `JWT_SECRET` inyectada en el servicio `api`.
+- **`backend/security/sessions.py`** *(creado)*: Emisión/validación de JWT HS256 (`create_access_token`, `decode_access_token`) y gestión de cookie `HttpOnly` (`pgguardian_session`, `SameSite=Lax`, `Path=/`).
+- **`backend/services/analysis_store.py`** y **`backend/services/user_store.py`** *(modificados)*: Se añadieron `failed_login_attempts` y `locked_until` en `users`, la tabla `sessions` (`id`, `user_id`, `expires_at`, `revoked_at`, `created_at` con índice `idx_sessions_user_active`) y operaciones atómicas de bloqueo (`record_failed_login`, `reset_failed_logins`), sesiones (`create_session`, `get_active_session_user`, `revoke_session`, `revoke_other_sessions`) y actualización de hash (`update_user_password`).
+- **`backend/api/auth.py`**, **`backend/api/schemas.py`**, **`backend/api/routers/auth.py`** y **`backend/api/main.py`** *(modificados)*:
+  - `get_current_user` y `get_current_user_id` exigen cookie `pgguardian_session` (o `Authorization: Bearer`) respaldada por sesión activa en `app_db`, devolviendo `401` si falta, expiró o fue revocada.
+  - `POST /api/auth/register` emite sesión y cookie `HttpOnly` al crear la cuenta.
+  - `POST /api/auth/login` devuelve `"Credenciales inválidas."` (`401`) ante correo inexistente o contraseña errónea y bloquea 15 min (`429` + `Retry-After`) a partir del 6.º intento tras 5 fallos (CA-05).
+  - `GET /api/auth/me`, `POST /api/auth/logout` (revoca sesión y limpia cookie) y `POST /api/auth/password` (valida contraseña actual, aplica políticas RF-02.2, guarda nuevo hash Argon2id y revoca las demás sesiones activas).
+  - Todos los endpoints `/api/*` exigen sesión (`401` en `/api/full-scan`, `/api/analyses*`, `/api/bloat/*`, `/api/config/*`, `/api/health/*`, `/api/indexes/*`, `/api/queries/*`), exceptuando únicamente `/api/auth/register`, `/api/auth/login` y `/api/health-check` (RF-02.5 / CA-06).
+
+### 2. Detección de Sesión Activa en el Cliente
+1. Al iniciar la aplicación (`App.jsx`), antes de renderizar vistas protegidas o disparar `fullScan()`, se consulta `GET /api/auth/me` con `credentials: 'include'`, ya que la cookie `pgguardian_session` es `HttpOnly` y no puede leerse desde JavaScript.
+2. Mientras `authChecked === false`, tanto `/` como `ProtectedRoute` muestran un indicador de carga (`Verificando sesión…`), evitando parpadeos de interfaz privada o peticiones sin sesión.
+3. Si `GET /api/auth/me` responde `200`, `user` se inicializa con `{id, name, email}`; si responde `401`, `user` permanece en `null` y `ProtectedRoute` redirige cualquier ruta del dashboard hacia `/`.
+4. Ante cualquier respuesta `401` posterior en `requestJSON`, `setUnauthorizedHandler` reinicia el estado en memoria (`user`, pestañas, modales) y redirige a `/`.
+
+### 3. Flujo de Redirección tras Registro e Inicio de Sesión
+1. El usuario envía el formulario en la pestaña **Iniciar sesión** (`POST /api/auth/login`) o **Crear cuenta** (`POST /api/auth/register`) en `AuthLandingPage`.
+2. El backend valida credenciales/políticas, registra la sesión en `app_db.sessions` y adjunta la cookie `HttpOnly` `pgguardian_session` en la respuesta (`200` o `201`).
+3. `onAuthenticated` actualiza `user` y `authChecked = true`, reinicia la pestaña local y ejecuta `navigate('/dashboard', { replace: true })`.
+4. Al montarse el dashboard autenticado, `App.jsx` ejecuta `fullScan()` y habilita el acceso a `/dashboard`, `/history` (con los análisis propios del usuario autenticado) y las páginas de categorías; si un usuario ya autenticado visita `/` o `/register`, `<Navigate to="/dashboard" replace />` lo redirige automáticamente al dashboard.
+
+### 4. Verificación Ejecutada
+- **Pruebas unitarias (`docker exec pgguardian_api python -m unittest discover -s tests -v`)**: **49 pruebas aprobadas** (`OK` en 0.776 s), cubriendo registro, cookie `HttpOnly`, error genérico `401` y bloqueo de 15 min al 6.º intento (`429`, CA-05), cierre de sesión, cambio de contraseña con revocación de sesiones previas y verificación de `get_current_user` en todas las rutas `/api/*` salvo `/register`, `/login` y `/health-check` (RF-02.5 / CA-06).
+- **Prueba en vivo sobre `pgguardian_api` y `pgguardian_appdb`**: confirmados `401` sin cookie en `/api/full-scan`, `/api/analyses`, `/api/bloat/table-bloat` y `/api/auth/me`, `200` en `/api/health-check`, acceso con cookie tras `register`/`login`, revocación de sesión previa tras `/api/auth/password`, invalidación tras `/api/auth/logout` y bloqueo `429` de 15 min tras 5 fallos (datos temporales eliminados al concluir).
+- **Frontend (`pgguardian_frontend`)**: `npx eslint` sobre `src/App.jsx`, `src/api/pgguardian.js`, `src/components/ProtectedRoute.jsx`, `src/components/Sidebar.jsx`, `src/components/ChangePasswordModal.jsx`, `src/pages/AuthLandingPage.jsx` y `src/pages/HistoryPage.jsx` + `npm run build` sin errores; HTTP `200` en `/`, `/dashboard` y `/register`.
+
+---
+
+## Auditoría e Implementación de Requisitos No Funcionales (RNF-01 a RNF-05)
+
+### 1. Matriz de Diagnóstico Inicial
+
+| ID | Categoría | Estado inicial | Evidencia encontrada en el código |
+|---|---|---|---|
+| **RNF-01** | Seguridad (Aislamiento) | **Parcial** | `backend/services/sandbox_runner.py` y `sql_validator.py` usan credenciales dedicadas (`SANDBOX_DB_*`), rol `NOSUPERUSER` (`sandbox_runner`), bases efímeras `sandbox_<uuid>` y bloqueo AST de `dblink`/`postgres_fdw`/FDW/roles/`COPY PROGRAM`/`ALTER SYSTEM`; sin embargo, `docker-compose.yml` compartía una sola red puente por defecto entre `sandbox_db`, `app_db` y `db`. |
+| **RNF-02** | Seguridad (Rate Limiting) | **No implementado** | Ni `backend/api/routers/auth.py` ni `backend/api/main.py` contaban con limitador de peticiones por dirección IP para `POST /api/auth/login` y `POST /api/auth/register`. |
+| **RNF-03** | Rendimiento (Latencias) | **Parcial** *(cuello $O(N^2)$ en AST)* | El hash Argon2id (`p95 = 23.0 ms`) y el análisis de 1 MB / 50 tablas (`8.17 s`) cumplían inicialmente el umbral (< 1 s y < 60 s), pero `_locate_statement` en `backend/services/sql_validator.py` recorría todos los tokens y rebanadas `sql_text[:start]` desde el inicio por cada sentencia ($O(N^2)$, `4.75 s` solo en AST para 1 MB). |
+| **RNF-04** | Usabilidad (Idioma) | **Parcial** | Permanecían etiquetas en inglés en la UI (`Warning`, `Overview`, `Health Monitor`, `Auto-refresh`, `Dashboard`, `Schema`, `Dead Tuples`, `Sequential Scans`, `Covering Index`, `Stats Obsoletas`, `Wildcards`, `Temp Spills`), en etiquetas de `scan_service.py` y en errores de `RequestValidationError` de FastAPI cuando faltan campos o hay JSON inválido (`"Field required"`). |
+| **RNF-05** | Portabilidad (Modo Local) | **Parcial** | `db` (`tiendadb`), `api` y `frontend` arrancaban localmente con TiendaDB, pero `tiendadb_idle_tx` fallaba en bucle (`Restarting (127)`) debido a saltos de línea CRLF (`\r\n`) en `scripts/start_idle_tx.sh` bajo Windows. |
+
+### 2. Acciones Tomadas y Archivos Editados
+
+- **`docker-compose.yml`** *(RNF-01)*: Se segregaron cuatro redes Docker explícitas: `app_net` (`internal: true`, exclusiva entre `api` y `app_db`), `sandbox_net` (`internal: true`, exclusiva entre `api` y `sandbox_db`), `tienda_net` (`internal: true`, entre `db`, `idle_tx` y `api`) y `public_net` (`bridge`, para puertos publicados de `db`, `api` y `frontend`).
+- **`backend/security/rate_limit.py`** y **`backend/api/main.py`** *(RNF-02)*: Se creó `SlidingWindowRateLimiter` (`max_requests=10`, `window_seconds=60`) sin dependencias externas ni Redis, montado como middleware HTTP (`enforce_auth_rate_limit`) sobre `POST /api/auth/login` y `POST /api/auth/register` devolviendo `429 Too Many Requests` con `Retry-After` y mensaje en español.
+- **`backend/services/sql_validator.py`** *(RNF-03)*: Se optimizó `_locate_statement` y `validate_sql_script` con cursor incremental de tokens y conteo incremental de saltos de línea ($O(N)$), preservando exactamente el cálculo de líneas.
+- **`backend/api/main.py`**, **`backend/services/scan_service.py`** y vistas/componentes del frontend (`SeverityBadge.jsx`, `Sidebar.jsx`, `App.jsx`, `Overview.jsx`, `BloatPage.jsx`, `ConfigPage.jsx`, `HealthPage.jsx`, `IndexesPage.jsx`, `QueriesPage.jsx`, `AuthLandingPage.jsx`) *(RNF-04)*: Se agregó `@app.exception_handler(RequestValidationError)` para traducir al español errores nativos de FastAPI/Pydantic y se tradujeron las etiquetas visibles restantes al español sin alterar las claves JSON ni las severidades internas.
+- **`scripts/start_idle_tx.sh`** y **`.gitattributes`** *(RNF-05)*: Se normalizó `start_idle_tx.sh` a finales de línea LF (`\n`) y se añadió `*.sh text eol=lf` en `.gitattributes` para evitar regresiones al clonar en Windows.
+- **`backend/tests/test_rnf.py`** *(creado)*: Cobertura unitaria de RNF-02 (10 req/min por IP, `429` en español, recuperación tras 60 s), RNF-03 (exactitud de líneas y velocidad lineal en AST) y RNF-04 (handler en español para campos faltantes).
+
+### 3. Mecanismos Implementados
+
+1. **Aislamiento de redes y privilegios (RNF-01):** `sandbox_db` únicamente pertenece a `sandbox_net` (`internal: true`), por lo que no puede resolver ni alcanzar `app_db` ni `db`, ni abrir tráfico saliente; la ejecución corre bajo el rol `sandbox_runner` (`NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOREPLICATION`) en bases temporales `sandbox_<uuid>` con `REVOKE ALL ... FROM PUBLIC`.
+2. **Rate limiting en memoria por IP (RNF-02):** `SlidingWindowRateLimiter` usa `threading.Lock`, `collections.deque` y `time.monotonic()` por par `(ruta, ip)` podando entradas expiradas y acotando el diccionario en memoria. Lee `request.client.host` por defecto (y solo acepta `X-Forwarded-For` si `TRUST_PROXY_HEADERS=true`) para evitar suplantación de IP.
+3. **Optimización de latencias (RNF-03):** Tras el cursor incremental en `validate_sql_script`, el tiempo de validación AST para 1 MB / 50 tablas (3,750 sentencias) bajó de `4.75 s` a `0.48 s` (tiempo total de análisis end-to-end en sandbox: `4.11 s` frente al límite de `60 s`); las peticiones HTTP a `POST /api/auth/login` registraron `p50 = 41.3 ms` y `p95 = 50.1 ms` (frente al límite de `1,000 ms`).
+
+### 4. Verificación y No-Regresión (RNF-05)
+
+- **Pruebas unitarias (`docker exec pgguardian_api python -m unittest discover -s tests -v`)**: **54 pruebas aprobadas** (`OK` en 0.775 s).
+- **Frontend (`pgguardian_frontend`)**: `npx eslint` sin errores sobre los 14 archivos modificados/creados y `npm run build` exitoso (257 ms).
+- **Verificación en vivo sobre contenedores recreados (`docker compose up -d --build`)**:
+  - **RNF-01:** `getent hosts app_db` desde `pgguardian_sandboxdb` falló por aislamiento de red y `pg_roles` confirmó `sandbox_runner` sin privilegios (`f/f/f/f`).
+  - **RNF-02:** 10 peticiones `POST /api/auth/register` aceptadas (evaluación normal) y la 11.ª rechazada con `429` en español.
+  - **RNF-03:** Login HTTP `p95 = 50.1 ms` (< 1 s); análisis 1 MB / 50 tablas = `4.11 s` (< 60 s).
+  - **RNF-04:** `POST /api/auth/register` con `{}` devolvió `422` con `"Este campo es obligatorio."`.
+  - **RNF-05:** `tiendadb_idle_tx` quedó estable (`Up` sin reinicios) y `GET /api/full-scan` sobre TiendaDB respondió `200` (`health_score=0`, `total_findings=64`) con categorías en español.
+
+---
+
+## Persistencia de Análisis de Bases de Datos por Usuario (`app_db`)
+
+### 1. Archivos Modificados en Backend y Frontend
+
+- **`backend/services/analysis_store.py`** *(modificado)*:
+  - Se formalizó la relación entre `analyses` y `users` definiendo `user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE` en `_SCHEMA_DDL` (y bloque migratorio idempotente para actualizar esquemas previos agregando la llave foránea `fk_analyses_user` conservando análisis pertenecientes a usuarios válidos).
+  - Todas las consultas (`insert_analysis`, `list_analyses_for_user`, `get_analysis_for_user`, `delete_analysis_for_user`) proyectan `user_id::text`, validan UUID en entrada (`_parse_uuid_or_none`) y filtran estrictamente por el `user_id` autenticado (RF-01.8).
+- **`backend/tests/test_analyses_lifecycle.py`** *(modificado)*: Se añadió `test_analyses_schema_has_users_fk_and_store_guards_non_uuid_user` validando la llave foránea `REFERENCES users(id) ON DELETE CASCADE` y el rechazo seguro de identificadores no UUID.
+- **`frontend/src/App.jsx`** *(modificado)*:
+  - Se incorporó un efecto ligado a `user` que consulta automáticamente `listAnalyses()` (`GET /api/analyses`) y, si el usuario cuenta con análisis previos en `app_db`, obtiene el detalle del más reciente vía `getAnalysisDetail(items[0].id)` (`GET /api/analyses/{id}`) para restaurar su pestaña junto con **TiendaDB (Local)** al iniciar sesión o recargar la página.
+- **`frontend/src/pages/HistoryPage.jsx`** *(modificado)*: Se corrigió la interpolación `{currentUser?.email || currentUser?.name || ''}` en el mensaje de estado vacío para evitar errores de renderizado en React 19 cuando el usuario aún no tiene análisis registrados.
+
+### 2. Esquema Relacional y JSON en `app_db`
+
+Tabla `public.analyses` en `app_db`:
+- **Identidad y propiedad:** `id UUID PRIMARY KEY`, `user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE` (`fk_analyses_user`), índice `idx_analyses_user_created (user_id, created_at DESC)`.
+- **Metadatos del análisis (sin contenido SQL crudo):** `name VARCHAR(200)`, `status VARCHAR(32)`, `message TEXT`, `file_count INTEGER`, `total_size_bytes BIGINT`, `files_json JSONB` (almacena exclusivamente `order`, `filename`, `size_bytes`, `encoding`, `line_count`; nunca el texto fuente `.sql` ni credenciales).
+- **Resumen y hallazgos permanentes:** `health_score INTEGER`, `total_findings INTEGER`, `scan_json JSONB` (reporte completo de categorías, detectores, severidades, evidencia y pasos de remediación), `executed_statements INTEGER`, `execution_time_ms INTEGER`, `created_at TIMESTAMPTZ`.
+- **Ciclo sandbox (24 h):** `sandbox_db_name VARCHAR(63)`, `sandbox_status VARCHAR(20)`, `sandbox_expires_at TIMESTAMPTZ`, `sandbox_destroyed_at TIMESTAMPTZ`. Al destruirse la base temporal en `sandbox_db` tras 24 h (`sandbox_status = 'destroyed'`), el reporte en `app_db` permanece consultable en el historial y en las pestañas.
+
+### 3. Flujo de Restauración en Frontend tras Iniciar Sesión
+
+1. Al completar el login (`POST /api/auth/login`), registro (`POST /api/auth/register`) o recargar el navegador con cookie `HttpOnly` activa (`GET /api/auth/me`), `App.jsx` ejecuta simultáneamente:
+   - `fullScan()` para mantener actualizada la pestaña base **TiendaDB (Local)**.
+   - `listAnalyses()` (`GET /api/analyses`) ordenado por `created_at DESC`.
+2. Si existen análisis guardados (`items.length > 0`), solicita `getAnalysisDetail(items[0].id)` y agrega automáticamente la pestaña restaurada en `AnalysisTabs`, enfocándola si el usuario estaba en la pestaña por defecto sin perder **TiendaDB (Local)** ni pestañas ya abiertas.
+3. En `/history` (`HistoryPage.jsx`), el usuario puede inspeccionar o abrir en pestaña cualquiera de sus análisis históricos (`Abrir pestaña`) sin volver a cargar los archivos `.sql`.
+4. Al crear un análisis nuevo en `NewAnalysisModal`, se persiste en `app_db`, se agrega la nueva pestaña manteniendo las anteriores y se incrementa `historyRefreshKey`.
+
+### 4. Verificación Realizada
+
+- **Pruebas unitarias (`docker exec pgguardian_api python -m unittest discover -s tests -v`)**: **55 pruebas aprobadas** (`OK` en 0.741 s).
+- **Esquema en `pgguardian_appdb`**: `\d analyses` confirmó `user_id uuid NOT NULL` con llave foránea `fk_analyses_user` hacia `users(id)` y preservación de los 2 análisis existentes de usuario real.
+- **Prueba end-to-end tras cierre de sesión y re-ingreso**:
+  1. Registro de usuario A y carga de `ventas.sql` vía `POST /api/analyses` (`201 Created`, `health_score=49`, `files` sin campo `content`).
+  2. Cierre de sesión (`POST /api/auth/logout`) e inicio de sesión nuevo (`POST /api/auth/login` con cookie jar limpio).
+  3. `GET /api/analyses` devolvió el registro guardado y `GET /api/analyses/{id}` devolvió el reporte completo sin re-subir el script.
+  4. Usuario B recibió lista vacía (`total=0`) en `GET /api/analyses` y `404` en `GET /api/analyses/{id}` (RF-01.8 / CA-03). Registros de prueba limpiados al concluir.
+- **Frontend (`pgguardian_frontend`)**: `npx eslint src/App.jsx src/pages/HistoryPage.jsx` y `npm run build` sin errores.
+
+
+
+
+
 
 
 

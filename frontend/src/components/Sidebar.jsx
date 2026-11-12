@@ -4,9 +4,9 @@ import './Sidebar.css'
 
 const navItems = [
   {
-    path: '/',
-    label: 'Overview',
-    description: 'Resumen general',
+    path: '/dashboard',
+    label: 'Resumen',
+    description: 'Panel general',
   },
   {
     path: '/history',
@@ -15,7 +15,7 @@ const navItems = [
   },
   {
     path: '/bloat',
-    label: 'Bloat',
+    label: 'Fragmentación',
     description: 'Bloat y mantenimiento',
   },
   {
@@ -35,12 +35,18 @@ const navItems = [
   },
   {
     path: '/queries',
-    label: 'Queries',
-    description: 'Queries problemáticas',
+    label: 'Consultas',
+    description: 'Consultas problemáticas',
   },
 ]
 
-export default function Sidebar({ scanData, currentUser, onUserChange }) {
+export default function Sidebar({
+  scanData,
+  currentUser,
+  onOpenChangePassword,
+  onLogout,
+  isLoggingOut = false,
+}) {
   const getCategoryCount = (category) => {
     if (!scanData?.categories?.[category]) return null
     const cat = scanData.categories[category]
@@ -66,7 +72,7 @@ export default function Sidebar({ scanData, currentUser, onUserChange }) {
           <img src={Logo} alt="PgGuardian" className="logo-img" />
           <div>
             <h1 className="logo-text">PgGuardian</h1>
-            <span className="logo-subtitle">Health Monitor</span>
+            <span className="logo-subtitle">Monitor de Salud</span>
           </div>
         </div>
       </div>
@@ -98,20 +104,36 @@ export default function Sidebar({ scanData, currentUser, onUserChange }) {
       </nav>
 
       <div className="sidebar-footer">
-        {onUserChange && (
-          <label className="sidebar-user-picker">
-            <span className="user-picker-label">Sesión activa</span>
-            <select
-              className="user-picker-select"
-              value={currentUser}
-              onChange={(e) => onUserChange(e.target.value)}
-              aria-label="Seleccionar usuario activo"
-            >
-              <option value="usuario_a">usuario_a</option>
-              <option value="usuario_b">usuario_b</option>
-              <option value="usuario_c">usuario_c</option>
-            </select>
-          </label>
+        {currentUser && (
+          <div className="sidebar-user-card">
+            <div className="sidebar-user-meta">
+              <span className="user-picker-label">Sesión activa</span>
+              <strong className="sidebar-user-name">{currentUser.name}</strong>
+              <span className="sidebar-user-email mono">{currentUser.email}</span>
+            </div>
+            <div className="sidebar-user-actions">
+              {onOpenChangePassword && (
+                <button
+                  type="button"
+                  className="sidebar-action-btn"
+                  onClick={onOpenChangePassword}
+                  disabled={isLoggingOut}
+                >
+                  Cambiar contraseña
+                </button>
+              )}
+              {onLogout && (
+                <button
+                  type="button"
+                  className="sidebar-action-btn sidebar-action-btn--danger"
+                  onClick={onLogout}
+                  disabled={isLoggingOut}
+                >
+                  {isLoggingOut ? 'Cerrando…' : 'Cerrar sesión'}
+                </button>
+              )}
+            </div>
+          </div>
         )}
         <div className="sidebar-status">
           <span className={`status-dot ${scanData ? 'status-dot--connected' : 'status-dot--disconnected'}`}></span>

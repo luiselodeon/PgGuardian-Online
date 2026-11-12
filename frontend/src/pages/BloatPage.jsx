@@ -8,7 +8,7 @@ export default function BloatPage({ scanData, isLoading }) {
     return (
       <div className="page">
         <div className="page-header">
-          <h1 className="page-title">Bloat y Mantenimiento</h1>
+          <h1 className="page-title">Fragmentación y Mantenimiento</h1>
         </div>
         <div className="skeleton" style={{ height: 200, borderRadius: 14 }}></div>
         <div className="skeleton" style={{ height: 200, borderRadius: 14 }}></div>
@@ -23,25 +23,25 @@ export default function BloatPage({ scanData, isLoading }) {
   return (
     <div className="page fade-in">
       <div className="page-header">
-        <h1 className="page-title">Bloat y Mantenimiento</h1>
-        <p className="page-subtitle">Bloat en tablas, autovacuum desactivado y dead tuples</p>
+        <h1 className="page-title">Fragmentación y Mantenimiento</h1>
+        <p className="page-subtitle">Fragmentación (bloat) en tablas, autovacuum desactivado y tuplas muertas</p>
       </div>
 
       <div className="page-content">
         <DataTable
-          title="Bloat en Tablas"
+          title="Fragmentación en Tablas"
           data={tableBloatData}
           columns={[
             { key: 'tblname', label: 'Tabla' },
-            { key: 'schemaname', label: 'Schema' },
+            { key: 'schemaname', label: 'Esquema' },
             { key: 'real_size', label: 'Tamaño Real' },
-            { key: 'bloat_size', label: 'Tamaño Bloat' },
-            { key: 'bloat_pct', label: 'Bloat %' },
+            { key: 'bloat_size', label: 'Tamaño Desperdiciado' },
+            { key: 'bloat_pct', label: 'Fragmentación %' },
             { key: 'extra_pct', label: 'Extra %' },
             { key: 'evidence', label: 'Evidencia' },
             { key: 'sql_combined', label: 'Recomendación SQL' },
           ]}
-          emptyMessage="No se detectó bloat significativo en las tablas"
+          emptyMessage="No se detectó fragmentación significativa en las tablas"
         />
 
         <DataTable
@@ -57,18 +57,18 @@ export default function BloatPage({ scanData, isLoading }) {
         />
 
         <DataTable
-          title="Dead Tuples"
+          title="Tuplas Muertas"
           data={deadTuplesData}
           columns={[
             { key: 'table_name', label: 'Tabla' },
-            { key: 'schemaname', label: 'Schema' },
+            { key: 'schemaname', label: 'Esquema' },
             { key: 'n_live_tup', label: 'Filas Vivas' },
             { key: 'n_dead_tup', label: 'Filas Muertas' },
-            { key: 'dead_tuple_pct', label: 'Dead %' },
+            { key: 'dead_tuple_pct', label: 'Muertas %' },
             { key: 'evidence', label: 'Evidencia' },
             { key: 'sql_combined', label: 'Recomendación SQL' },
           ]}
-          emptyMessage="No se encontraron tablas con dead tuples"
+          emptyMessage="No se encontraron tablas con tuplas muertas"
         />
       </div>
     </div>

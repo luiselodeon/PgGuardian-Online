@@ -78,19 +78,19 @@ export default function ConfigPage({ scanData, isLoading }) {
 
         {/* pg_stat_statements límite de tracking */}
         <section className="detector-section">
-          <h3 className="detector-section-title">Límite de Tracking de Queries</h3>
+          <h3 className="detector-section-title">Límite de Rastreo de Consultas</h3>
           <FindingList
             data={config?.detectors?.pg_stat_limit?.data}
-            emptyMessage="El tracking de queries es suficiente (sin eviction detectada)"
+            emptyMessage="El rastreo de consultas es suficiente (sin desalojo detectado)"
           />
         </section>
 
-        {/* Logging de queries lentas */}
+        {/* Logging de consultas lentas */}
         <section className="detector-section">
-          <h3 className="detector-section-title">Logging de Queries Lentas</h3>
+          <h3 className="detector-section-title">Registro de Consultas Lentas</h3>
           <FindingList
             data={config?.detectors?.slow_query_logging?.data}
-            emptyMessage="El registro de queries lentas está habilitado"
+            emptyMessage="El registro de consultas lentas está habilitado"
           />
         </section>
       </div>

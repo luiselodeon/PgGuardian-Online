@@ -81,7 +81,7 @@ export default function HistoryPage({ currentUser, refreshKey, onOpenTab, onDele
           : await getAnalysisDetail(analysisId)
       if (onOpenTab) {
         onOpenTab(detail)
-        navigate('/')
+        navigate('/dashboard')
       }
     } catch (err) {
       setError(err.message)
@@ -113,7 +113,8 @@ export default function HistoryPage({ currentUser, refreshKey, onOpenTab, onDele
         <div className="page-header">
           <h1 className="page-title">Historial de Análisis</h1>
           <p className="page-subtitle">
-            Reportes de scripts SQL pertenecientes a <code className="mono">{currentUser}</code>
+            Reportes de scripts SQL pertenecientes a{' '}
+            <code className="mono">{currentUser?.email || currentUser?.name || ''}</code>
           </p>
         </div>
         <button type="button" className="history-refresh-btn" onClick={handleRefresh} disabled={isLoading}>
@@ -132,7 +133,8 @@ export default function HistoryPage({ currentUser, refreshKey, onOpenTab, onDele
       ) : items.length === 0 ? (
         <div className="history-empty">
           <p>
-            No hay análisis registrados para <code className="mono">{currentUser}</code>.
+            No hay análisis registrados para{' '}
+            <code className="mono">{currentUser?.email || currentUser?.name || ''}</code>.
           </p>
           <p className="history-empty-hint">
             Usa el botón <strong>«Nuevo análisis»</strong> en la barra superior para cargar scripts <code className="mono">.sql</code>.

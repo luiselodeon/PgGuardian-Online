@@ -21,7 +21,7 @@ export default function QueriesPage({ scanData, isLoading }) {
     return (
       <div className="page">
         <div className="page-header">
-          <h1 className="page-title">Queries Problemáticas</h1>
+          <h1 className="page-title">Consultas Problemáticas</h1>
         </div>
         <div className="skeleton" style={{ height: 200, borderRadius: 14 }}></div>
         <div className="skeleton" style={{ height: 200, borderRadius: 14 }}></div>
@@ -40,8 +40,8 @@ export default function QueriesPage({ scanData, isLoading }) {
   return (
     <div className="page fade-in">
       <div className="page-header">
-        <h1 className="page-title">Queries Problemáticas</h1>
-        <p className="page-subtitle">Detección de temp spills, seq scans, queries lentas y anti-patrones</p>
+        <h1 className="page-title">Consultas Problemáticas</h1>
+        <p className="page-subtitle">Detección de derrames temporales, escaneos secuenciales, consultas lentas y anti-patrones</p>
       </div>
 
       <div className={`status-banner ${pgStatEnabled ? 'status-banner--ok' : 'status-banner--warn'}`}>
@@ -54,39 +54,39 @@ export default function QueriesPage({ scanData, isLoading }) {
 
       <div className="page-content">
         <QuerySection
-          title="Temp Spills (Escritura a Disco)"
+          title="Derrames Temporales (Escritura a Disco)"
           data={tempSpillsData}
           columns={[
             { key: 'title', label: 'Hallazgo' },
             { key: 'severity', label: 'Severidad' },
             { key: 'evidence', label: 'Evidencia' },
-            { key: 'query_sample', label: 'Query', width: '30%' },
+            { key: 'query_sample', label: 'Consulta', width: '30%' },
           ]}
-          emptyMessage="No se detectaron queries con escritura a disco"
+          emptyMessage="No se detectaron consultas con escritura temporal a disco"
         />
 
         <QuerySection
-          title="Sequential Scans"
+          title="Escaneos Secuenciales"
           data={seqScansData}
           columns={[
             { key: 'title', label: 'Hallazgo' },
             { key: 'calls', label: 'Ejecuciones' },
             { key: 'evidence', label: 'Evidencia' },
-            { key: 'query', label: 'Query', width: '30%' },
+            { key: 'query', label: 'Consulta', width: '30%' },
           ]}
-          emptyMessage="No se detectaron queries con Seq Scan"
+          emptyMessage="No se detectaron consultas con escaneo secuencial"
         />
 
         <QuerySection
-          title="Queries con Mayor Tiempo Acumulado"
+          title="Consultas con Mayor Tiempo Acumulado"
           data={topTimeData}
           columns={[
             { key: 'title', label: 'Hallazgo' },
             { key: 'severity', label: 'Severidad' },
             { key: 'evidence', label: 'Evidencia' },
-            { key: 'query_sample', label: 'Query', width: '35%' },
+            { key: 'query_sample', label: 'Consulta', width: '35%' },
           ]}
-          emptyMessage="No se detectaron queries con tiempo acumulado alto"
+          emptyMessage="No se detectaron consultas con tiempo acumulado alto"
         />
 
         <QuerySection
@@ -101,15 +101,15 @@ export default function QueriesPage({ scanData, isLoading }) {
         />
 
         <QuerySection
-          title="Spills Detectados por EXPLAIN"
+          title="Derrames Detectados por EXPLAIN"
           data={explainData}
           columns={[
             { key: 'title', label: 'Hallazgo' },
             { key: 'severity', label: 'Severidad' },
             { key: 'evidence', label: 'Evidencia' },
-            { key: 'query_sample', label: 'Query', width: '30%' },
+            { key: 'query_sample', label: 'Consulta', width: '30%' },
           ]}
-          emptyMessage="No se detectaron spills en los planes de ejecución"
+          emptyMessage="No se detectaron derrames en los planes de ejecución"
         />
       </div>
     </div>

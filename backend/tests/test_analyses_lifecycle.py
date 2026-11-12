@@ -5,11 +5,18 @@ from uuid import uuid4
 
 from fastapi import HTTPException
 
-from api.auth import get_current_user_id
+from api.auth import get_current_user, get_current_user_id
 from api.routers.analyses import (
     delete_analysis,
     get_analysis_detail,
     list_analyses,
+)
+from security.sessions import create_access_token
+from services.analysis_store import (
+    _SCHEMA_DDL,
+    delete_analysis_for_user,
+    get_analysis_for_user,
+    list_analyses_for_user,
 )
 from services.sandbox_cleanup import cleanup_expired_sandboxes
 
@@ -17,15 +24,30 @@ from services.sandbox_cleanup import cleanup_expired_sandboxes
 class AnalysesLifecycleAndIsolationTests(unittest.IsolatedAsyncioTestCase):
     def test_auth_dependency_requires_valid_user_id(self):
         with self.assertRaises(HTTPException) as ctx:
-            get_current_user_id(x_user_id=None, session_user=None)
+            get_current_user(session_cookie=None, authorization=None)
         self.assertEqual(ctx.exception.status_code, 401)
 
         with self.assertRaises(HTTPException) as ctx:
-            get_current_user_id(x_user_id="   ", session_user=None)
+            get_current_user(session_cookie="token-invalido", authorization=None)
         self.assertEqual(ctx.exception.status_code, 401)
 
-        self.assertEqual(get_current_user_id(x_user_id="usuario_a", session_user=None), "usuario_a")
-        self.assertEqual(get_current_user_id(x_user_id=None, session_user="usuario_b"), "usuario_b")
+        uid = str(uuid4())
+        sid = str(uuid4())
+        token = create_access_token(
+            user_id=uid,
+            session_id=sid,
+            expires_at=datetime.now(timezone.utc) + timedelta(hours=1),
+        )
+        with patch("api.auth.get_active_session_user", return_value=None):
+            with self.assertRaises(HTTPException) as revoked_ctx:
+                get_current_user(session_cookie=token, authorization=None)
+            self.assertEqual(revoked_ctx.exception.status_code, 401)
+
+        user_row = {"id": uid, "name": "Ana", "email": "ana@ejemplo.mx", "session_id": sid}
+        with patch("api.auth.get_active_session_user", return_value=user_row):
+            self.assertEqual(get_current_user(session_cookie=token, authorization=None), user_row)
+            self.assertEqual(get_current_user(session_cookie=None, authorization=f"Bearer {token}"), user_row)
+            self.assertEqual(get_current_user_id(current_user=user_row), uid)
 
     async def test_list_analyses_filters_by_current_user(self):
         now = datetime.now(timezone.utc)
@@ -135,6 +157,12 @@ class AnalysesLifecycleAndIsolationTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(purged, 1)
         mock_mark.assert_called_once_with("11111111-1111-1111-1111-111111111111")
+
+    def test_analyses_schema_has_users_fk_and_store_guards_non_uuid_user(self):
+        self.assertIn("user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE", _SCHEMA_DDL)
+        self.assertEqual(list_analyses_for_user("no-es-uuid"), [])
+        self.assertIsNone(get_analysis_for_user(str(uuid4()), "no-es-uuid"))
+        self.assertIsNone(delete_analysis_for_user(str(uuid4()), "no-es-uuid"))
 
 
 if __name__ == "__main__":

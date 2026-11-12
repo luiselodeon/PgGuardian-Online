@@ -18,18 +18,23 @@ import asyncio
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 
-from fastapi import FastAPI, Depends
+from fastapi import FastAPI, Depends, Request, status
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from starlette.concurrency import run_in_threadpool
 
+from api.auth import get_current_user
 from api.database import get_connection
 from api.schemas import FullScanResponse
+from security.rate_limit import auth_rate_limiter, extract_client_ip
 from services.analysis_store import init_app_db_schema
 from services.sandbox_cleanup import sandbox_cleanup_loop
 from services.scan_service import run_full_scan
 
 # Importar routers
 from api.routers import analyses as analyses_router
+from api.routers import auth as auth_router
 from api.routers import bloat as bloat_router
 from api.routers import config as config_router
 from api.routers import health as health_router
@@ -72,13 +77,68 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Registrar routers
+_RATE_LIMITED_AUTH_PATHS = frozenset({"/api/auth/login", "/api/auth/register"})
+_VALIDATION_MSG_ES = {
+    "missing": "Este campo es obligatorio.",
+    "json_invalid": "El cuerpo JSON de la petición no es válido.",
+    "string_type": "El valor debe ser una cadena de texto.",
+    "int_parsing": "El valor debe ser un número entero válido.",
+    "int_type": "El valor debe ser un número entero.",
+    "bool_parsing": "El valor debe ser booleano.",
+}
+
+
+@app.middleware("http")
+async def enforce_auth_rate_limit(request: Request, call_next):
+    """Limita login y registro a 10 peticiones por minuto por IP (RNF-02)."""
+    if request.method == "POST" and request.url.path in _RATE_LIMITED_AUTH_PATHS:
+        client_ip = extract_client_ip(request)
+        allowed, retry_after = auth_rate_limiter.check(request.url.path, client_ip)
+        if not allowed:
+            return JSONResponse(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                headers={"Retry-After": str(retry_after)},
+                content={
+                    "detail": (
+                        "Demasiadas peticiones desde tu dirección IP. "
+                        f"Máximo 10 solicitudes por minuto; intenta en {retry_after} s."
+                    )
+                },
+            )
+    return await call_next(request)
+
+
+@app.exception_handler(RequestValidationError)
+async def spanish_validation_exception_handler(
+    _request: Request,
+    exc: RequestValidationError,
+):
+    """Normaliza errores de validación FastAPI/Pydantic al español (RNF-04)."""
+    translated = []
+    for err in exc.errors():
+        item = dict(err)
+        err_type = item.get("type", "")
+        raw_msg = str(item.get("msg", ""))
+        if err_type in _VALIDATION_MSG_ES:
+            item["msg"] = _VALIDATION_MSG_ES[err_type]
+        elif raw_msg.startswith("Value error, "):
+            item["msg"] = raw_msg[len("Value error, "):]
+        item.pop("ctx", None)
+        translated.append(item)
+    return JSONResponse(
+        status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+        content={"detail": translated},
+    )
+
+# Registrar routers (RF-02.5: detectores y análisis protegidos por sesión)
+protected = [Depends(get_current_user)]
 app.include_router(analyses_router.router)
-app.include_router(bloat_router.router)
-app.include_router(config_router.router)
-app.include_router(health_router.router)
-app.include_router(indexes_router.router)
-app.include_router(queries_router.router)
+app.include_router(auth_router.router)
+app.include_router(bloat_router.router, dependencies=protected)
+app.include_router(config_router.router, dependencies=protected)
+app.include_router(health_router.router, dependencies=protected)
+app.include_router(indexes_router.router, dependencies=protected)
+app.include_router(queries_router.router, dependencies=protected)
 
 
 @app.get("/api/health-check")
@@ -104,7 +164,10 @@ def health_check(conn=Depends(get_connection)):
 
 
 @app.get("/api/full-scan", response_model=FullScanResponse)
-def full_scan(conn=Depends(get_connection)):
+def full_scan(
+    conn=Depends(get_connection),
+    _current_user: dict = Depends(get_current_user),
+):
     """
     Ejecuta TODOS los detectores sobre la conexión fija local (TiendaDB)
     y devuelve un reporte consolidado con health score calculado.

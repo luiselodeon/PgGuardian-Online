@@ -9,7 +9,7 @@ export default function SeverityBadge({ severity }) {
     MEDIUM: { label: 'Media', className: 'severity--medium' },
     LOW: { label: 'Baja', className: 'severity--low' },
     OK: { label: 'OK', className: 'severity--ok' },
-    WARNING: { label: 'Warning', className: 'severity--medium' },
+    WARNING: { label: 'Advertencia', className: 'severity--medium' },
     NO_APLICA: { label: 'No aplica', className: 'severity--na' },
   }
 

@@ -131,10 +131,16 @@
   gap: 12px;
 }
 
-.sidebar-user-picker {
+.sidebar-user-card {
   display: flex;
   flex-direction: column;
-  gap: 5px;
+  gap: 10px;
+}
+
+.sidebar-user-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
 }
 
 .user-picker-label {
@@ -144,16 +150,53 @@
   color: var(--text-secondary);
 }
 
-.user-picker-select {
+.sidebar-user-name {
+  font-size: 0.88rem;
+  color: var(--text-primary);
+  line-height: 1.3;
+}
+
+.sidebar-user-email {
+  font-size: 0.74rem;
+  color: var(--text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sidebar-user-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.sidebar-action-btn {
   width: 100%;
   padding: 6px 10px;
   border-radius: var(--radius-sm);
   border: 1px solid var(--border-card);
   background: var(--bg-elevated);
   color: var(--text-primary);
-  font-family: var(--font-mono);
-  font-size: 0.8rem;
+  font-family: var(--font-sans);
+  font-size: 0.78rem;
+  font-weight: 600;
   cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.sidebar-action-btn:hover:not(:disabled) {
+  background: var(--bg-hover);
+  border-color: var(--border-accent);
+}
+
+.sidebar-action-btn--danger:hover:not(:disabled) {
+  color: var(--severity-high);
+  border-color: rgba(239, 68, 68, 0.4);
+}
+
+.sidebar-action-btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
 }
 
 .sidebar-status {

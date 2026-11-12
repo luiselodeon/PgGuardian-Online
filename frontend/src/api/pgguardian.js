@@ -1,42 +1,25 @@
 /*
-Este es el Cliente API para PgGuardian.
-
-Aquí se va a centralizar todas las llamadas al backend de FastAPI.
-Se usa un Base URL configurable, manejo de errores y función fullScan 
-que ejecuta todos los detectores en una sola petición.
-
-Este documento fue hecho con ayuda de Inteligencia Artificial. 
+Cliente API centralizado para PgGuardian.
+Usa cookies HttpOnly de sesión (credentials: 'include') para todas las rutas protegidas.
 */
 
 const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8000/api';
-const USER_STORAGE_KEY = 'pgguardian_user_id';
-const DEFAULT_USER_ID = 'usuario_a';
 
-export function getCurrentUserId() {
-  try {
-    return localStorage.getItem(USER_STORAGE_KEY) || DEFAULT_USER_ID;
-  } catch {
-    return DEFAULT_USER_ID;
-  }
-}
+let unauthorizedHandler = null;
 
-export function setCurrentUserId(userId) {
-  const clean = (userId || DEFAULT_USER_ID).trim() || DEFAULT_USER_ID;
-  try {
-    localStorage.setItem(USER_STORAGE_KEY, clean);
-  } catch {
-    // Ignorar si localStorage no está disponible
-  }
-  return clean;
-}
-
-function authHeaders() {
-  return { 'X-User-Id': getCurrentUserId() };
+export function setUnauthorizedHandler(handler) {
+  unauthorizedHandler = handler;
 }
 
 function extractApiError(data, status, fallbackPrefix) {
   const detail = data?.detail;
   if (typeof detail === 'string') return detail;
+  if (Array.isArray(detail) && detail.length > 0) {
+    const messages = detail
+      .map((item) => (item?.msg || '').replace(/^Value error,\s*/i, '').trim())
+      .filter(Boolean);
+    if (messages.length > 0) return messages.join(' ');
+  }
   if (detail && typeof detail === 'object') {
     const location = detail.filename && detail.line
       ? ` (${detail.filename}, línea ${detail.line})`
@@ -46,38 +29,94 @@ function extractApiError(data, status, fallbackPrefix) {
   return `${fallbackPrefix} (${status})`;
 }
 
-async function fetchJSON(endpoint) {
-  const res = await fetch(`${API_BASE}${endpoint}`);
-  if (!res.ok) {
-    throw new Error(`API error ${res.status}: ${res.statusText}`);
+async function requestJSON(endpoint, options = {}, { fallbackPrefix = 'Error en la petición', notifyUnauthorized = true } = {}) {
+  let res;
+  try {
+    res = await fetch(`${API_BASE}${endpoint}`, {
+      credentials: 'include',
+      ...options,
+    });
+  } catch {
+    throw new Error('No se pudo conectar con el servidor de PgGuardian. Verifica que el backend esté en ejecución.');
   }
-  return res.json();
-}
 
-async function fetchAnalysesJSON(endpoint, options = {}, fallbackPrefix = 'Error en análisis') {
-  const res = await fetch(`${API_BASE}${endpoint}`, {
-    ...options,
-    headers: {
-      ...authHeaders(),
-      ...(options.headers || {}),
-    },
-  });
   const data = await res.json().catch(() => null);
+  if (res.status === 401 && notifyUnauthorized && unauthorizedHandler) {
+    unauthorizedHandler();
+  }
   if (!res.ok) {
     throw new Error(extractApiError(data, res.status, fallbackPrefix));
   }
   return data;
 }
 
-// En esta parte van a estar todas las funciones que estén en el API del Backend
+// Health Check (público)
+export const healthCheck = () =>
+  requestJSON('/health-check', {}, { fallbackPrefix: 'Error al verificar conectividad', notifyUnauthorized: false });
 
-// Health Check
-export const healthCheck = () => fetchJSON('/health-check');
+// Autenticación y sesiones (RF-02.1 a RF-02.6)
+export async function getCurrentUser() {
+  let res;
+  try {
+    res = await fetch(`${API_BASE}/auth/me`, { credentials: 'include' });
+  } catch {
+    throw new Error('No se pudo conectar con el servidor de PgGuardian.');
+  }
+  if (res.status === 401) {
+    return null;
+  }
+  const data = await res.json().catch(() => null);
+  if (!res.ok) {
+    throw new Error(extractApiError(data, res.status, 'Error al verificar la sesión'));
+  }
+  return data;
+}
 
-// Full Scan
-export const fullScan = () => fetchJSON('/full-scan');
+export const registerUser = (payload) =>
+  requestJSON(
+    '/auth/register',
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    },
+    { fallbackPrefix: 'No se pudo completar el registro', notifyUnauthorized: false },
+  );
 
-// Análisis de scripts SQL (RF-01.1 a RF-01.8)
+export const loginUser = (payload) =>
+  requestJSON(
+    '/auth/login',
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    },
+    { fallbackPrefix: 'No se pudo iniciar sesión', notifyUnauthorized: false },
+  );
+
+export const logoutUser = () =>
+  requestJSON(
+    '/auth/logout',
+    { method: 'POST' },
+    { fallbackPrefix: 'No se pudo cerrar la sesión', notifyUnauthorized: false },
+  );
+
+export const changePassword = (payload) =>
+  requestJSON(
+    '/auth/password',
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    },
+    { fallbackPrefix: 'No se pudo actualizar la contraseña', notifyUnauthorized: false },
+  );
+
+// Full Scan (protegido)
+export const fullScan = () =>
+  requestJSON('/full-scan', {}, { fallbackPrefix: 'Error al ejecutar el escaneo' });
+
+// Análisis de scripts SQL (RF-01.1 a RF-01.8, protegidos)
 export async function createAnalysis(files, order, name) {
   const formData = new FormData();
   files.forEach((file) => formData.append('files', file));
@@ -88,57 +127,53 @@ export async function createAnalysis(files, order, name) {
     formData.append('name', name.trim());
   }
 
-  return fetchAnalysesJSON(
+  return requestJSON(
     '/analyses',
     { method: 'POST', body: formData },
-    'Error al validar el análisis',
+    { fallbackPrefix: 'Error al validar el análisis' },
   );
 }
 
 export const listAnalyses = () =>
-  fetchAnalysesJSON('/analyses', {}, 'No se pudo cargar el historial');
+  requestJSON('/analyses', {}, { fallbackPrefix: 'No se pudo cargar el historial' });
 
 export const getAnalysisDetail = (analysisId) =>
-  fetchAnalysesJSON(`/analyses/${encodeURIComponent(analysisId)}`, {}, 'No se pudo cargar el análisis');
+  requestJSON(`/analyses/${encodeURIComponent(analysisId)}`, {}, { fallbackPrefix: 'No se pudo cargar el análisis' });
 
 export const deleteAnalysis = (analysisId) =>
-  fetchAnalysesJSON(
+  requestJSON(
     `/analyses/${encodeURIComponent(analysisId)}`,
     { method: 'DELETE' },
-    'No se pudo eliminar el análisis',
+    { fallbackPrefix: 'No se pudo eliminar el análisis' },
   );
 
-// Bloat
-export const getTableBloat = () => fetchJSON('/bloat/table-bloat');
-export const getDisabledAutovacuum = () => fetchJSON('/bloat/disabled-autovacuum');
-export const getDeadTuples = () => fetchJSON('/bloat/dead-tuples');
+// Detectores individuales (protegidos)
+export const getTableBloat = () => requestJSON('/bloat/table-bloat');
+export const getDisabledAutovacuum = () => requestJSON('/bloat/disabled-autovacuum');
+export const getDeadTuples = () => requestJSON('/bloat/dead-tuples');
 
-// Config
-export const getWorkMem = () => fetchJSON('/config/work-mem');
-export const evaluateWorkMem = () => fetchJSON('/config/evaluate-work-mem');
-export const getSharedBuffers = () => fetchJSON('/config/shared-buffers');
-export const evaluateSharedBuffers = () => fetchJSON('/config/evaluate-shared-buffers');
-export const evaluatePgStatMax = () => fetchJSON('/config/evaluate-pg-stat-max');
-export const getPgStatLimit = () => fetchJSON('/config/pg-stat-limit');
-export const getSlowQueryLogging = () => fetchJSON('/config/slow-query-logging');
+export const getWorkMem = () => requestJSON('/config/work-mem');
+export const evaluateWorkMem = () => requestJSON('/config/evaluate-work-mem');
+export const getSharedBuffers = () => requestJSON('/config/shared-buffers');
+export const evaluateSharedBuffers = () => requestJSON('/config/evaluate-shared-buffers');
+export const evaluatePgStatMax = () => requestJSON('/config/evaluate-pg-stat-max');
+export const getPgStatLimit = () => requestJSON('/config/pg-stat-limit');
+export const getSlowQueryLogging = () => requestJSON('/config/slow-query-logging');
 
-// Health
-export const getPartitioningCandidates = () => fetchJSON('/health/partitioning-candidates');
-export const getIdleInTransaction = () => fetchJSON('/health/idle-in-transaction');
+export const getPartitioningCandidates = () => requestJSON('/health/partitioning-candidates');
+export const getIdleInTransaction = () => requestJSON('/health/idle-in-transaction');
 
-// Indexes
-export const getMissingPartialIndexes = () => fetchJSON('/indexes/missing-partial');
-export const getMissingIndexes = () => fetchJSON('/indexes/missing');
-export const getDuplicateIndexes = () => fetchJSON('/indexes/duplicate');
-export const getUnusedIndexes = () => fetchJSON('/indexes/unused');
-export const getCoveringCandidates = () => fetchJSON('/indexes/covering-candidates');
-export const getObsoleteStats = () => fetchJSON('/indexes/obsolete-stats');
-export const getLeadingWildcards = () => fetchJSON('/indexes/leading-wildcards');
+export const getMissingPartialIndexes = () => requestJSON('/indexes/missing-partial');
+export const getMissingIndexes = () => requestJSON('/indexes/missing');
+export const getDuplicateIndexes = () => requestJSON('/indexes/duplicate');
+export const getUnusedIndexes = () => requestJSON('/indexes/unused');
+export const getCoveringCandidates = () => requestJSON('/indexes/covering-candidates');
+export const getObsoleteStats = () => requestJSON('/indexes/obsolete-stats');
+export const getLeadingWildcards = () => requestJSON('/indexes/leading-wildcards');
 
-// Queries
-export const getPgStatStatus = () => fetchJSON('/queries/pg-stat-status');
-export const getTempSpills = () => fetchJSON('/queries/temp-spills');
-export const getSeqScans = () => fetchJSON('/queries/seq-scans');
-export const getTopTimeQueries = () => fetchJSON('/queries/top-time');
-export const getDatabaseTempUsage = () => fetchJSON('/queries/db-temp-usage');
-export const getExplainSpills = () => fetchJSON('/queries/explain-spills');
+export const getPgStatStatus = () => requestJSON('/queries/pg-stat-status');
+export const getTempSpills = () => requestJSON('/queries/temp-spills');
+export const getSeqScans = () => requestJSON('/queries/seq-scans');
+export const getTopTimeQueries = () => requestJSON('/queries/top-time');
+export const getDatabaseTempUsage = () => requestJSON('/queries/db-temp-usage');
+export const getExplainSpills = () => requestJSON('/queries/explain-spills');

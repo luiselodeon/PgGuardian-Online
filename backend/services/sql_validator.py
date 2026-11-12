@@ -335,22 +335,36 @@ class _SafetyVisitor(visitors.Visitor):
             )
 
 
-def _locate_statement(sql_text: str, raw_stmt: ast.RawStmt, tokens: list) -> tuple[int, str]:
+def _locate_statement(
+    sql_text: str,
+    raw_stmt: ast.RawStmt,
+    tokens: list,
+    tok_idx: int,
+    prev_pos: int,
+    prev_line: int,
+) -> tuple[int, str, int, int, int]:
+    """Calcula línea e inicio de sentencia en O(1) amortizado usando cursores crecientes."""
     loc = raw_stmt.stmt_location
     end = loc + raw_stmt.stmt_len if raw_stmt.stmt_len > 0 else len(sql_text)
-    start = loc
-    for tok in tokens:
-        if tok.start < loc:
-            continue
-        if tok.start >= end:
-            break
-        if tok.name not in _COMMENT_OR_EMPTY_TOKENS:
-            start = tok.start
-            break
+    n_tokens = len(tokens)
+    while tok_idx < n_tokens and tokens[tok_idx].start < loc:
+        tok_idx += 1
 
-    line = sql_text[:start].count("\n") + 1
+    start = loc
+    scan_idx = tok_idx
+    while scan_idx < n_tokens and tokens[scan_idx].start < end:
+        if tokens[scan_idx].name not in _COMMENT_OR_EMPTY_TOKENS:
+            start = tokens[scan_idx].start
+            tok_idx = scan_idx
+            break
+        scan_idx += 1
+
+    if start >= prev_pos:
+        line = prev_line + sql_text.count("\n", prev_pos, start)
+    else:
+        line = sql_text.count("\n", 0, start) + 1
     stmt_sql = sql_text[start:end].strip()
-    return line, stmt_sql
+    return line, stmt_sql, tok_idx, start, line
 
 
 def validate_sql_script(filename: str, sql_text: str) -> list[ParsedStatement]:
@@ -377,9 +391,14 @@ def validate_sql_script(filename: str, sql_text: str) -> list[ParsedStatement]:
 
     tokens = list(parser.scan(sql_text))
     statements: list[ParsedStatement] = []
+    tok_idx = 0
+    prev_pos = 0
+    prev_line = 1
 
     for raw_stmt in raw_tree:
-        line, stmt_sql = _locate_statement(sql_text, raw_stmt, tokens)
+        line, stmt_sql, tok_idx, prev_pos, prev_line = _locate_statement(
+            sql_text, raw_stmt, tokens, tok_idx, prev_pos, prev_line
+        )
         visitor = _SafetyVisitor()
         visitor(raw_stmt.stmt)
         if visitor.violation is not None:
