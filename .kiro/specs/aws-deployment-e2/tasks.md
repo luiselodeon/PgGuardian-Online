@@ -70,8 +70,8 @@ Lenguajes: Python (FastAPI, unittest), JavaScript (React/Vite), YAML (Compose), 
     - Crear `docs/aws/decision-log.md` con la entrada R24.7: `requisito_afectado` «hallazgo del despliegue, sin RF ni CA en la fuente», el resultado de la revisión (llamadas encontradas) y el cambio aplicado. T-26 (tarea 9.4) completa el resto del registro.
     - _Hallazgo del despliegue · Requirements: 26.1, 26.2, 26.3, 24.7_
 
-- [ ] 2. Verificación local previa al despliegue (T-08)
-  - [ ] 2.1 T-08: Script de verificación local de la Fase 1
+- [x] 2. Verificación local previa al despliegue (T-08)
+  - [x] 2.1 T-08: Script de verificación local de la Fase 1
     - Crear `scripts/verify_phase1.sh` y `scripts/verify_phase1.ps1`.
     - Paso 0: si no existe el `.env` local o `JWT_SECRET` falta o está vacío, detenerse antes de levantar contenedores, indicar qué falta y cómo corregirlo (p. ej. copiar `.env.prod.example` a `.env` y definir `JWT_SECRET`) y salir con código distinto de 0.
     - Antes de `up`, crear `./.data/sandbox` (o la ruta de `SANDBOX_DATA_DIR` si el `.env` la define) si no existe, porque con `create_host_path: false` Docker ya no la crea. Si no se puede crear, detenerse antes de levantar contenedores, mostrar la ruta y la causa, y salir con código distinto de 0.
