@@ -7,11 +7,20 @@
 #   docker compose -f docker-compose.prod.yml up -d --build
 # =====================================================================
 
+# Política común de rotación de logs (RF-04.2 / T-02 / CA-10):
+# máx. 3 archivos × 10 MB = 30 MB por contenedor, 150 MB para los cinco.
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
 services:
   proxy:
     image: caddy:2-alpine
     container_name: pgguardian_proxy
     restart: unless-stopped
+    logging: *logging
     ports:
       - "80:80"
       - "443:443"
@@ -35,6 +44,7 @@ services:
         VITE_API_URL: ${VITE_API_URL:-/api}
     container_name: pgguardian_frontend_prod
     restart: unless-stopped
+    logging: *logging
     networks:
       - public_net
     depends_on:
@@ -46,6 +56,10 @@ services:
       dockerfile: Dockerfile.api
     container_name: pgguardian_api_prod
     restart: unless-stopped
+    logging: *logging
+    # RF-04.3 / T-03 / CA-11: suma api + app_db + sandbox_db = 1408 MiB,
+    # deja >= 600 MiB de los 2048 MiB de la t3.small para SO y Docker.
+    mem_limit: 512m
     command: ["uvicorn", "api.main:app", "--host", "0.0.0.0", "--port", "8000"]
     environment:
       APP_DB_HOST: app_db
@@ -60,7 +74,7 @@ services:
       SANDBOX_DB_ADMIN_PASSWORD: ${SANDBOX_DB_ADMIN_PASSWORD}
       SANDBOX_DB_EXEC_USER: ${SANDBOX_DB_EXEC_USER}
       SANDBOX_DB_EXEC_PASSWORD: ${SANDBOX_DB_EXEC_PASSWORD}
-      JWT_SECRET: ${JWT_SECRET}
+      JWT_SECRET: ${JWT_SECRET:?falta JWT_SECRET}
       CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost}
       COOKIE_SECURE: ${COOKIE_SECURE:-true}
       TRUST_PROXY_HEADERS: ${TRUST_PROXY_HEADERS:-true}
@@ -78,6 +92,8 @@ services:
     image: postgres:16
     container_name: pgguardian_appdb_prod
     restart: unless-stopped
+    logging: *logging
+    mem_limit: 384m
     environment:
       POSTGRES_DB: ${APP_DB_NAME}
       POSTGRES_USER: ${APP_DB_USER}
@@ -96,12 +112,24 @@ services:
     image: postgres:16
     container_name: pgguardian_sandboxdb_prod
     restart: unless-stopped
+    logging: *logging
+    mem_limit: 512m
     environment:
       POSTGRES_DB: ${SANDBOX_DB_NAME}
       POSTGRES_USER: ${SANDBOX_DB_ADMIN_USER}
       POSTGRES_PASSWORD: ${SANDBOX_DB_ADMIN_PASSWORD}
+    # RF-04.4 / T-04 / CA-12: datos en el disco EBS propio del sandbox.
+    # En producción SANDBOX_DATA_DIR=/srv/sandbox/pgdata; en local se usa
+    # ./.data/sandbox. create_host_path: false hace que Docker se niegue a
+    # iniciar sandbox_db si el directorio no existe (p. ej. disco no
+    # montado) en lugar de crearlo en el disco raíz. Es la protección real,
+    # porque restart: unless-stopped levanta el contenedor sin pasar por systemd.
     volumes:
-      - sandbox_data:/var/lib/postgresql/data
+      - type: bind
+        source: ${SANDBOX_DATA_DIR:-./.data/sandbox}
+        target: /var/lib/postgresql/data
+        bind:
+          create_host_path: false
     networks:
       - sandbox_net
     healthcheck:
@@ -123,8 +151,6 @@ networks:
 volumes:
   app_data:
     name: pgguardian_app_data
-  sandbox_data:
-    name: pgguardian_sandbox_data
   caddy_data:
     name: pgguardian_caddy_data
   caddy_config:
