@@ -17,6 +17,7 @@ bajo la carpeta de /api fueron normalizados con ayuda de la Inteligencia Artific
 import asyncio
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
+import logging
 import os
 
 from fastapi import FastAPI, Depends, Request, status
@@ -41,6 +42,8 @@ from api.routers import config as config_router
 from api.routers import health as health_router
 from api.routers import indexes as indexes_router
 from api.routers import queries as queries_router
+
+logger = logging.getLogger("pgguardian.api")
 
 
 @asynccontextmanager
@@ -156,34 +159,35 @@ app.include_router(queries_router.router, dependencies=protected)
 
 @app.get("/api/health-check")
 def health_check():
-    """Verifica conectividad con PostgreSQL (TiendaDB en local o app_db en producción)."""
+    """Verifica conectividad con PostgreSQL sin filtrar detalles internos (RF-04.6).
+
+    Local (DB_HOST definida): TiendaDB vía get_connection().
+    Producción (DB_HOST no definida): app_db con connect_timeout=2.
+    La respuesta contiene únicamente la clave `status`; el detalle del error
+    va solo al log del servidor.
+    """
     conn_gen = None
     conn = None
     try:
         if os.getenv("DB_HOST"):
             conn_gen = get_connection()
             conn = next(conn_gen)
-            target = "tiendadb"
         else:
-            conn = connect_app_db()
-            target = "app_db"
+            conn = connect_app_db(connect_timeout=2)
         with conn.cursor() as cur:
-            cur.execute("SELECT version();")
-            version = cur.fetchone()[0]
-        return {
-            "status": "ok",
-            "database": "connected",
-            "target": target,
-            "pg_version": version,
-            "timestamp": datetime.now(timezone.utc).isoformat(),
-        }
-    except Exception as e:
-        return {
-            "status": "error",
-            "database": "disconnected",
-            "error": str(e),
-            "timestamp": datetime.now(timezone.utc).isoformat(),
-        }
+            cur.execute("SELECT 1")
+        return {"status": "ok"}
+    except Exception as exc:
+        logger.error(
+            "health-check falló [%s]: %s: %s",
+            datetime.now(timezone.utc).isoformat(),
+            type(exc).__name__,
+            exc,
+        )
+        return JSONResponse(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            content={"status": "error"},
+        )
     finally:
         if conn_gen is not None:
             conn_gen.close()

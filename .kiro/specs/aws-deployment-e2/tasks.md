@@ -42,7 +42,7 @@ Lenguajes: Python (FastAPI, unittest), JavaScript (React/Vite), YAML (Compose), 
     - Ampliar la CSP del `Caddyfile` solo con las directivas de la fuente bloqueada, si se observan violaciones.
     - _RF-04.5 · CA-13 · Requirements: 5.4, 5.5_
 
-  - [ ] 1.7 T-07: Sanear el endpoint existente `/api/health-check` (sin filtración de información)
+  - [x] 1.7 T-07: Sanear el endpoint existente `/api/health-check` (sin filtración de información)
     - El endpoint `GET /api/health-check` ya existe en `backend/api/main.py` (función `health_check`, sin autenticación). Modificar ese manejador; no añadir uno nuevo.
     - En `backend/services/analysis_store.py`, cambiar la firma a `connect_app_db(connect_timeout: int = 10)` y pasar `connect_timeout` a `psycopg2.connect`. El valor por defecto preserva el comportamiento actual de los demás llamadores.
     - En `health_check`, conservar la bifurcación por `DB_HOST`. Producción (`DB_HOST` no definida): llamar a `connect_app_db(connect_timeout=2)` (ya importada en `main.py`). Local (`DB_HOST` definida): usar `get_connection()` de `backend/api/database.py`. No usar `get_connection()` en la ruta de producción, porque apunta a TiendaDB, que no existe en producción.

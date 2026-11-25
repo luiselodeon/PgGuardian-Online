@@ -123,30 +123,34 @@ class RnfSecurityAndQualityTests(unittest.TestCase):
 
     def test_rf03_health_check_uses_app_db_without_db_host_and_tiendadb_when_set(self):
         fake_cur = MagicMock()
-        fake_cur.fetchone.return_value = ("PostgreSQL 16.0",)
         fake_conn = MagicMock()
         fake_conn.cursor.return_value.__enter__.return_value = fake_cur
 
+        # Producción (sin DB_HOST): app_db con timeout de 2 s, nunca TiendaDB.
         with (
             patch.dict(os.environ, {}, clear=False),
             patch("api.main.connect_app_db", return_value=fake_conn) as mock_app_db,
+            patch("api.main.get_connection") as mock_tienda,
         ):
             os.environ.pop("DB_HOST", None)
             res = health_check()
-        self.assertEqual(res["status"], "ok")
-        self.assertEqual(res["target"], "app_db")
-        mock_app_db.assert_called_once()
+        self.assertEqual(res, {"status": "ok"})
+        mock_app_db.assert_called_once_with(connect_timeout=2)
+        mock_tienda.assert_not_called()
+        fake_cur.execute.assert_called_once_with("SELECT 1")
         fake_conn.close.assert_called_once()
 
         def _fake_gen():
             yield fake_conn
 
+        # Local (DB_HOST definida): TiendaDB vía get_connection(), nunca app_db.
         with (
             patch.dict(os.environ, {"DB_HOST": "db"}),
             patch("api.main.get_connection", side_effect=_fake_gen) as mock_tienda,
+            patch("api.main.connect_app_db") as mock_app_db,
         ):
             res_local = health_check()
-        self.assertEqual(res_local["status"], "ok")
-        self.assertEqual(res_local["target"], "tiendadb")
+        self.assertEqual(res_local, {"status": "ok"})
         mock_tienda.assert_called_once()
+        mock_app_db.assert_not_called()
 

@@ -107,15 +107,18 @@ CREATE INDEX IF NOT EXISTS idx_analyses_sandbox_expiry
 """
 
 
-def connect_app_db():
-    """Conecta exclusivamente a app_db mediante variables APP_DB_*."""
+def connect_app_db(connect_timeout: int = 10):
+    """Conecta exclusivamente a app_db mediante variables APP_DB_*.
+
+    `connect_timeout` (segundos) permite al health-check acotar la espera (R6).
+    """
     conn = psycopg2.connect(
         dbname=os.getenv("APP_DB_NAME", "pgguardian_app"),
         user=os.getenv("APP_DB_USER", "pgguardian_app_user"),
         password=os.getenv("APP_DB_PASSWORD", "pgguardian_app_pass"),
         host=os.getenv("APP_DB_HOST", "app_db"),
         port=int(os.getenv("APP_DB_PORT", "5432")),
-        connect_timeout=10,
+        connect_timeout=connect_timeout,
     )
     conn.autocommit = True
     return conn
