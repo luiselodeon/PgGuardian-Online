@@ -1,0 +1,103 @@
+{
+  "fecha": "2026-11-25T02:55:31.363Z",
+  "usuario": "r263.1795575267485@example.com",
+  "pasos": [
+    {
+      "t_s": 0.79,
+      "paso": "Abrir http://localhost"
+    },
+    {
+      "t_s": 2.26,
+      "paso": "Registro de usuario nuevo"
+    },
+    {
+      "t_s": 2.8,
+      "paso": "Cierre de sesión"
+    },
+    {
+      "t_s": 2.99,
+      "paso": "Inicio de sesión"
+    },
+    {
+      "t_s": 4.15,
+      "paso": "Nuevo análisis con 01_schema.sql, 02_seed_data.sql, 03_plant_problems.sql"
+    },
+    {
+      "t_s": 19.57,
+      "paso": "Apertura del resultado (Ver pestaña en Dashboard)"
+    },
+    {
+      "t_s": 22.61,
+      "paso": "Historial"
+    },
+    {
+      "t_s": 25.7,
+      "paso": "Inactividad de 35 s"
+    },
+    {
+      "t_s": 60.71,
+      "paso": "Fin del flujo"
+    }
+  ],
+  "total_api": 8,
+  "prohibidas": [
+    "/api/full-scan",
+    "/api/bloat",
+    "/api/config",
+    "/api/health/",
+    "/api/indexes",
+    "/api/queries"
+  ],
+  "coincidencias_prohibidas": [],
+  "resultado": "aprobado",
+  "solicitudes": [
+    {
+      "t_s": 1.67,
+      "method": "GET",
+      "path": "/api/auth/me",
+      "status": 401
+    },
+    {
+      "t_s": 2.54,
+      "method": "POST",
+      "path": "/api/auth/register",
+      "status": 201
+    },
+    {
+      "t_s": 2.79,
+      "method": "GET",
+      "path": "/api/analyses",
+      "status": 200
+    },
+    {
+      "t_s": 2.94,
+      "method": "POST",
+      "path": "/api/auth/logout",
+      "status": 200
+    },
+    {
+      "t_s": 3.96,
+      "method": "POST",
+      "path": "/api/auth/login",
+      "status": 200
+    },
+    {
+      "t_s": 4.13,
+      "method": "GET",
+      "path": "/api/analyses",
+      "status": 200
+    },
+    {
+      "t_s": 4.83,
+      "method": "POST",
+      "path": "/api/analyses",
+      "status": 201
+    },
+    {
+      "t_s": 22.69,
+      "method": "GET",
+      "path": "/api/analyses",
+      "status": 200
+    }
+  ]
+}
