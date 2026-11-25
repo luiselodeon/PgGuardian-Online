@@ -4,7 +4,7 @@
 
 Este documento convierte los requisitos del Entregable 2 de PgGuardian (despliegue en AWS) en requisitos en formato EARS con trazabilidad completa. Fuente: `PgGuardian - Requisitos del Entregable 2 (AWS).md` (RF-04 a RF-08, CA-09 a CA-27, T-01 a T-27, sección 3 de cambios al E1 y sección 6 de pendientes). La cadena de trazabilidad es RF → T → CA. Cada requisito indica sus RF originales, sus tareas T-xx y sus criterios CA-xx. La matriz completa está al final del documento.
 
-El diseño base no cambia: una instancia EC2 t3.small con Ubuntu 24.04 en us-east-2, Docker Compose con cinco contenedores, solo Caddy expuesto a internet, Elastic IP y `sslip.io`. El presupuesto es de 100 USD en créditos que vencen el 11 de mayo de 2027, con un costo estimado 24/7 de unos 22 USD al mes. La numeración continúa la del Entregable 1 (RF-01 a RF-03, CA-01 a CA-08, RNF-05).
+El diseño base no cambia: una instancia EC2 t3.small con Ubuntu 24.04 en us-east-2, Docker Compose con cinco contenedores, solo Caddy expuesto a internet, Elastic IP y `sslip.io`. La infraestructura AWS se crea con una plantilla de CloudFormation en un único stack llamado `pgguardian` (Requirement 29). El presupuesto es de 100 USD en créditos que vencen el 11 de mayo de 2027, con un costo estimado 24/7 de unos 22 USD al mes. La Instancia se enciende o se detiene a criterio del Equipo (Requirement 24, criterio 3), y la evaluación se hace con un video grabado que muestra el funcionamiento desde la URL pública, no con acceso en vivo. La numeración continúa la del Entregable 1 (RF-01 a RF-03, CA-01 a CA-08, RNF-05).
 
 Prioridades MoSCoW de la fuente: Debe, Debería, Podría. Cada requisito declara la suya. Los elementos de la fuente que se recortaron en esta versión se listan en la sección «Mejoras futuras», al final del documento, y cada desviación se registra según el Requirement 24.
 
@@ -40,6 +40,8 @@ Prioridades MoSCoW de la fuente: Debe, Debería, Podría. Cada requisito declara
 - **TIENDADB_SCAN_ENABLED**: Constante del Frontend derivada de `VITE_ENABLE_TIENDADB_SCAN`; es falsa en el build de producción (variable no definida) y verdadera en desarrollo.
 - **Pestaña_Local**: Pestaña `TiendaDB (Local)` (`LOCAL_TAB_ID = 'tiendadb-local'`, `kind: 'local'`) creada por `createLocalTab()` en `frontend/src/App.jsx`.
 - **Equipo**: Los integrantes del proyecto PgGuardian.
+- **Plantilla_CFN**: Plantilla de CloudFormation infra/cloudformation/pgguardian.yaml que crea la infraestructura AWS del despliegue.
+- **Stack**: Stack de CloudFormation llamado `pgguardian`, creado a partir de la Plantilla_CFN.
 
 ## Requirements
 
@@ -186,6 +188,8 @@ Prioridades MoSCoW de la fuente: Debe, Debería, Podría. Cada requisito declara
 
 **Trazabilidad:** RF-05.4 (Debe) · Tareas: T-11, T-13 · Criterios: CA-17
 
+**Recurso:** la Plantilla_CFN crea el Rol_EC2, su perfil de instancia y la Instancia en el Stack `pgguardian` (Requirement 29). Los criterios de verificación no cambian.
+
 #### Acceptance Criteria
 
 1. THE Rol_EC2 SHALL tener adjunta la política administrada `AmazonSSMManagedInstanceCore`, y la consulta de las políticas adjuntas al Rol_EC2 SHALL listar esa política.
@@ -213,6 +217,8 @@ Prioridades MoSCoW de la fuente: Debe, Debería, Podría. Cada requisito declara
 
 **Trazabilidad:** RF-06.1 (Debe) · Tareas: T-12 · Criterios: CA-18
 
+**Recurso:** la Plantilla_CFN crea el Security_Group con sus 2 reglas de entrada en el Stack `pgguardian` (Requirement 29). Los criterios de verificación no cambian.
+
 #### Acceptance Criteria
 
 1. THE Security_Group SHALL permitir la entrada de tráfico TCP en los puertos 80 y 443 desde `0.0.0.0/0`.
@@ -225,6 +231,8 @@ Prioridades MoSCoW de la fuente: Debe, Debería, Podría. Cada requisito declara
 **User Story:** Como responsable de seguridad, quiero exigir IMDSv2, para mitigar el robo de credenciales por SSRF.
 
 **Trazabilidad:** RF-06.2 (Debe) · Tareas: T-13 · Criterios: CA-19
+
+**Recurso:** la Plantilla_CFN define las opciones de metadatos de la Instancia (`MetadataOptions`) en el Stack `pgguardian` (Requirement 29). Los criterios de verificación no cambian.
 
 #### Acceptance Criteria
 
@@ -239,6 +247,8 @@ Prioridades MoSCoW de la fuente: Debe, Debería, Podría. Cada requisito declara
 **User Story:** Como responsable de seguridad, quiero discos cifrados con tamaño definido, para proteger los datos en reposo.
 
 **Trazabilidad:** RF-06.3 (Debe) · Tareas: T-13, T-14 · Criterios: CA-20
+
+**Recurso:** la Plantilla_CFN crea el disco raíz (en la definición de la Instancia) y el Volumen_Sandbox con su attachment en `/dev/sdf`, en el Stack `pgguardian` (Requirement 29). El formateo y el montaje en `/srv/sandbox` siguen en `bootstrap_host.sh`. Los criterios de verificación no cambian.
 
 #### Acceptance Criteria
 
@@ -267,6 +277,8 @@ Prioridades MoSCoW de la fuente: Debe, Debería, Podría. Cada requisito declara
 
 **Trazabilidad:** RF-06.5 (Debe) · Tareas: T-13 · Criterios: CA-20
 
+**Recurso:** la Plantilla_CFN fija `DisableApiTermination: true` en la Instancia del Stack `pgguardian` (Requirement 29). Los criterios de verificación no cambian.
+
 #### Acceptance Criteria
 
 1. WHEN la Instancia entra en estado `running` por primera vez tras su aprovisionamiento, THE Instancia SHALL tener el atributo `disableApiTermination` con valor `true`.
@@ -279,6 +291,8 @@ Prioridades MoSCoW de la fuente: Debe, Debería, Podría. Cada requisito declara
 **User Story:** Como responsable de costos, quiero recursos etiquetados, para identificarlos y asignarles responsables.
 
 **Trazabilidad:** RF-06.6 (Debería) · Tareas: T-13 (T-14 y T-15 para volumen y Elastic IP) · Criterios: CA-21
+
+**Recurso:** la Plantilla_CFN asigna las etiquetas a la Instancia, al disco raíz (`PropagateTagsToVolumeOnCreation: true`), al Volumen_Sandbox y a la Elastic_IP, y valida la longitud de `Owner` con su parámetro (Requirement 29). Los criterios de verificación no cambian.
 
 #### Acceptance Criteria
 
@@ -304,7 +318,9 @@ Prioridades MoSCoW de la fuente: Debe, Debería, Podría. Cada requisito declara
 
 **User Story:** Como usuario final, quiero acceder por HTTPS con certificado válido, para usar PgGuardian de forma segura.
 
-**Trazabilidad:** RF-06.8 (Podría), RF-03.1, RF-03.4 y RF-03.5 del E1 · Tareas: T-15, T-17, T-18 · Criterios: CA-23
+**Trazabilidad:** RF-06.8 (Podría), RF-03.1, RF-03.4 y RF-03.5 del E1; el criterio 8 apoya la sustitución de RF-03.6 (Requirement 24, criterio 3) · Tareas: T-15, T-17, T-18 y la sección «Encender y detener» del runbook (sin T-xx en la fuente) · Criterios: CA-23
+
+**Recurso:** la Plantilla_CFN crea la Elastic_IP del criterio 1 y la asocia a la Instancia en el Stack `pgguardian` (Requirement 29); su output `AppDomain` da el valor de `APP_DOMAIN` del criterio 2. Los criterios de verificación no cambian.
 
 #### Acceptance Criteria
 
@@ -315,12 +331,15 @@ Prioridades MoSCoW de la fuente: Debe, Debería, Podría. Cada requisito declara
 5. WHEN se abre `https://<Dominio_Publico>` en un navegador, THE Caddy SHALL presentar un certificado emitido por Let's Encrypt, vigente y cuyo nombre coincida con el Dominio_Publico, sin advertencias de seguridad del navegador.
 6. WHEN se solicita `http://<Dominio_Publico>` en el puerto 80, THE Caddy SHALL redirigir la solicitud a `https://<Dominio_Publico>`.
 7. IF el certificado no se obtiene tras usar el dominio de DuckDNS, THEN THE Caddy SHALL rechazar las conexiones HTTPS sin servir la aplicación por HTTP sin cifrar, y THE Equipo SHALL registrar el error de Caddy visible en los logs del contenedor.
+8. WHEN el Equipo detiene e inicia la Instancia, THE aplicación SHALL responder {"status":"ok"} en /api/health-check por la misma URL HTTPS en un máximo de 5 minutos después del inicio, sin intervención manual.
 
 ### Requirement 20: Presupuesto y alertas de gasto
 
 **User Story:** Como responsable de costos, quiero alertas de gasto, para no agotar los 100 USD de créditos.
 
-**Trazabilidad:** RF-07.1 (Debe), reemplaza RF-03.6 del E1 · Tareas: T-19 · Criterios: CA-24
+**Trazabilidad:** RF-07.1 (Debe); respalda la sustitución de RF-03.6 del E1 (Requirement 24, criterio 3) · Tareas: T-19 · Criterios: CA-24
+
+**Recurso:** la Plantilla_CFN crea el Presupuesto en el Stack `pgguardian` (Requirement 29), con el monto del parámetro `MonthlyBudgetUsd` (por defecto 30) y las notificaciones dirigidas al parámetro `AlertEmail`. Los criterios de verificación no cambian.
 
 #### Acceptance Criteria
 
@@ -336,12 +355,14 @@ Prioridades MoSCoW de la fuente: Debe, Debería, Podría. Cada requisito declara
 
 **User Story:** Como responsable de costos, quiero detectar gastos anómalos, para reaccionar a tiempo.
 
-**Trazabilidad:** RF-07.2 (Debería) · Tareas: T-20 · Criterios: CA-24
+**Trazabilidad:** RF-07.2 (Debería; desviación de R21.2 registrada en Requirement 24, criterio 10) · Tareas: T-20 · Criterios: CA-24
+
+**Recurso:** la Plantilla_CFN crea el monitor y la suscripción de Anomaly_Detection en el Stack `pgguardian` (Requirement 29). Si el despliegue falla en esos dos recursos, se crean con `scripts/aws/create_anomaly_detection.sh` (Requirement 29, criterio 10). Los criterios de verificación no cambian.
 
 #### Acceptance Criteria
 
 1. WHILE el servicio Anomaly_Detection está desplegado, THE Anomaly_Detection SHALL mantener al menos 1 monitor en estado activo que evalúe el gasto de la cuenta, con un máximo de 10 monitores activos.
-2. WHEN el Anomaly_Detection detecta un gasto anómalo, THE Anomaly_Detection SHALL enviar un aviso al correo del Equipo mediante una suscripción dentro de los 60 minutos posteriores a la detección.
+2. WHEN el Anomaly_Detection detecta un gasto anómalo, THE Anomaly_Detection SHALL enviar un resumen diario por correo con las anomalías detectadas, mediante una suscripción con frecuencia `DAILY` y correo directo al Equipo.
 3. IF la suscripción de correo del Equipo no está confirmada o el envío del aviso falla, THEN THE Anomaly_Detection SHALL conservar el registro de la anomalía detectada y SHALL indicar el fallo de entrega en el estado del monitor, de modo que el Equipo pueda corregir la suscripción.
 4. WHEN el Anomaly_Detection envía un aviso, THE Anomaly_Detection SHALL incluir en el aviso el nombre del monitor, el monto del gasto anómalo en USD y la fecha en que se detectó.
 
@@ -350,6 +371,8 @@ Prioridades MoSCoW de la fuente: Debe, Debería, Podría. Cada requisito declara
 **User Story:** Como operador, quiero recuperación automática ante fallos del sistema, para reducir el tiempo de caída.
 
 **Trazabilidad:** RF-07.3 (Debería) · Tareas: T-21 · Criterios: CA-25
+
+**Recurso:** la Plantilla_CFN crea la Alarma_Recover en el Stack `pgguardian` (Requirement 29). Los criterios de verificación no cambian.
 
 #### Acceptance Criteria
 
@@ -367,7 +390,7 @@ Prioridades MoSCoW de la fuente: Debe, Debería, Podría. Cada requisito declara
 #### Acceptance Criteria
 
 1. WHEN el sistema alcanza el estado estable (los servicios de App_DB y de la aplicación responden a sus verificaciones de salud durante al menos 5 minutos consecutivos), THE Equipo SHALL tomar un Snapshot_Manual del disco raíz (que contiene los datos de App_DB) y un Snapshot_Manual del Volumen_Sandbox.
-2. WHEN faltan 24 horas o menos para la demo, THE Equipo SHALL tomar un segundo Snapshot_Manual del disco raíz y un segundo Snapshot_Manual del Volumen_Sandbox antes de que empiece la demo.
+2. WHEN faltan 24 horas o menos para la grabación del video, THE Equipo SHALL tomar un segundo Snapshot_Manual del disco raíz y un segundo Snapshot_Manual del Volumen_Sandbox antes de que empiece la grabación del video.
 3. WHEN el Equipo toma un Snapshot_Manual, THE Equipo SHALL verificar que el snapshot queda en estado `completed`, sin restaurarlo.
 4. IF un Snapshot_Manual termina en estado `error`, THEN THE Equipo SHALL repetir el Snapshot_Manual del mismo volumen hasta obtener uno en estado `completed`.
 
@@ -375,19 +398,22 @@ Prioridades MoSCoW de la fuente: Debe, Debería, Podría. Cada requisito declara
 
 **User Story:** Como integrante del equipo, quiero registrar cada desviación del E1 y de la fuente, para tener justificación y aprobación documentadas.
 
-**Trazabilidad:** RF-08.1 (Debe), sección 3 de la fuente (cambios a RF-01.4, RF-03.3 y RF-03.6), desviaciones de RF-07.4/CA-26, RF-05.3 y CA-16, hallazgo del despliegue del Requirement 26 · Tareas: T-26 · Criterios: CA-27
+**Trazabilidad:** RF-08.1 (Debe), sección 3 de la fuente (cambios a RF-01.4, RF-03.3 y RF-03.6), desviaciones de RF-07.4/CA-26, RF-05.3 y CA-16, hallazgo del despliegue del Requirement 26, decisión de usar CloudFormation (Requirement 29), cambio de alcance del E2 (Requirement 28) y cambio de R21.2 (Requirement 21) · Tareas: T-26 · Criterios: CA-27
 
 #### Acceptance Criteria
 
 1. THE Registro_Decisiones SHALL contener una entrada para el refuerzo de RF-01.4 mediante el disco propio del sandbox (RF-04.4), con los campos: identificador del requisito afectado, descripción del cambio respecto al E1, justificación, fecha (formato AAAA-MM-DD) y aprobador, y con la justificación «un script que llena el disco no puede tumbar `app_db`».
 2. THE Registro_Decisiones SHALL contener una entrada para el reemplazo de RF-03.3 por Session Manager con el puerto 22 cerrado (RF-05.5), con los mismos campos que el criterio 1 y con la justificación «las IP domésticas cambian».
-3. THE Registro_Decisiones SHALL contener una entrada para el reemplazo de RF-03.6 por el control de gasto con Budgets (RF-07.1), con los mismos campos que el criterio 1 y con la justificación de que el costo 24/7 estimado de 22 USD al mes cabe en los créditos disponibles.
+3. THE Registro_Decisiones SHALL contener una entrada que sustituye a RF-03.6, con los mismos campos que el criterio 1, con el cambio «la instancia se enciende o se detiene a criterio del Equipo; no es requisito que esté disponible 24/7 ni que se detenga fuera de las demostraciones» y con la justificación «el peor caso (24/7, unos 22 USD al mes) cabe en los créditos de 100 USD, y el Presupuesto (R20) avisa si el gasto se desvía. La evaluación se hace con un video grabado, no con acceso en vivo».
 4. THE Registro_Decisiones SHALL contener una entrada para RF-07.4 y CA-26, con los mismos campos que el criterio 1, que indique que los respaldos se hacen con dos Snapshot_Manual por disco (Requirement 23) en lugar de una política de Amazon Data Lifecycle Manager, y que no se realiza prueba de restauración.
 5. THE Registro_Decisiones SHALL contener una entrada para RF-05.3, con los mismos campos que el criterio 1, que indique que el Grupo_Admins tiene como miembros a los integrantes del Equipo en lugar de exactamente dos usuarios.
 6. THE Registro_Decisiones SHALL contener una entrada para CA-16, con los mismos campos que el criterio 1, que indique que se omite la prueba con un Usuario_IAM sin MFA y que CA-16 se verifica con el reporte de credenciales y la definición de la Politica_Force_MFA (Requirement 9).
 7. THE Registro_Decisiones SHALL contener una entrada para el hallazgo del despliegue sobre las llamadas del Frontend a `/api/full-scan` y a los routers de detectores que dependen de TiendaDB (Requirement 26), con los mismos campos que el criterio 1, en la que el campo de requisito afectado indique «hallazgo del despliegue, sin RF ni CA en la fuente».
-8. WHEN se agrega una entrada al Registro_Decisiones, THE Equipo SHALL anotar en la especificación la aprobación de esa entrada, indicando nombre del aprobador y fecha (formato AAAA-MM-DD), en un plazo máximo de 2 días hábiles desde la fecha de la entrada.
-9. IF una entrada del Registro_Decisiones carece de alguno de los campos del criterio 1 o no tiene aprobación anotada en la especificación, THEN THE Equipo SHALL considerar la decisión como no aprobada y SHALL completar el campo faltante o la aprobación antes de dar por cerrada la tarea T-26.
+8. THE Registro_Decisiones SHALL contener una entrada para el uso de CloudFormation (Requirement 29), con los mismos campos que el criterio 1, con el cambio «CloudFormation en lugar de scripts de CLI para la infraestructura» y con la justificación «creación y borrado reproducibles en un solo stack; herramienta vista en el curso; estaba como 'Debería' en el documento de cambios».
+9. THE Registro_Decisiones SHALL contener una entrada con los mismos campos que el criterio 1, con el requisito afectado «alcance del E2 en la práctica de definición de requisitos», el cambio «el E2 pasa de 'multi-cliente con registro de usuarios y de bases propias' a 'despliegue en AWS'; el registro de usuarios se entregó en el E1 y la conexión a bases propias del cliente pasa a Mejoras futuras» y la justificación «decisión del Equipo: E1 = desarrollo, E2 = despliegue».
+10. THE Registro_Decisiones SHALL contener una entrada con los mismos campos que el criterio 1, con el requisito afectado «R21.2 / RF-07.2», el cambio «el aviso de anomalías pasa de ≤ 60 minutos a un resumen diario por correo» y la justificación «el correo directo de Cost Anomaly Detection solo admite frecuencia diaria o semanal; el aviso inmediato requiere SNS, y el Presupuesto (R20) ya alerta por correo».
+11. WHEN se agrega una entrada al Registro_Decisiones, THE Equipo SHALL anotar en la especificación la aprobación de esa entrada, indicando nombre del aprobador y fecha (formato AAAA-MM-DD), en un plazo máximo de 2 días hábiles desde la fecha de la entrada.
+12. IF una entrada del Registro_Decisiones carece de alguno de los campos del criterio 1 o no tiene aprobación anotada en la especificación, THEN THE Equipo SHALL considerar la decisión como no aprobada y SHALL completar el campo faltante o la aprobación antes de dar por cerrada la tarea T-26.
 
 ### Requirement 25: Paquete de evidencia
 
@@ -401,8 +427,8 @@ Prioridades MoSCoW de la fuente: Debe, Debería, Podría. Cada requisito declara
 2. IF el reporte de ZAP baseline contiene uno o más hallazgos de riesgo medio o alto, THEN THE Equipo SHALL corregir cada hallazgo y volver a ejecutar ZAP baseline hasta que el reporte no contenga hallazgos de riesgo medio o alto, o documentar para cada hallazgo restante una justificación escrita que indique la causa y la razón de aceptación del riesgo.
 3. WHEN el sistema está desplegado y la Elastic_IP está asignada, THE Equipo SHALL ejecutar `nmap` contra la Elastic_IP sobre los puertos TCP 1 a 65535 y guardar la salida completa en un archivo de texto con fecha y hora de ejecución.
 4. IF la salida de `nmap` muestra algún puerto abierto distinto de 80 y 443, THEN THE Equipo SHALL cerrar el puerto o documentar una justificación escrita para cada puerto adicional abierto.
-5. WHEN el sistema está desplegado, THE Equipo SHALL repetir CA-01 a CA-08 desde la URL pública y guardar, para cada criterio, al menos una captura de pantalla que muestre el resultado (aprobado o fallido) junto con la URL pública utilizada.
-6. THE Paquete_Evidencia SHALL incluir el reporte de ZAP sin hallazgos de riesgo medio o alto sin justificar, la salida de `nmap`, las justificaciones escritas de los puntos 2 y 4 si existen, y las capturas y resultados (aprobado o fallido) de los 8 criterios CA-01 a CA-08.
+5. WHEN el sistema está desplegado, THE Equipo SHALL repetir CA-01 a CA-08 desde la URL pública y guardar, para cada criterio, evidencia que muestre el resultado (aprobado o fallido) junto con la URL pública utilizada. La evidencia puede ser una captura de pantalla o el fragmento de la grabación del video en que se ejecuta el criterio, identificado por su marca de tiempo, siempre que la URL pública se vea en pantalla; no se exigen capturas por separado.
+6. THE Paquete_Evidencia SHALL incluir el reporte de ZAP sin hallazgos de riesgo medio o alto sin justificar, la salida de `nmap`, las justificaciones escritas de los puntos 2 y 4 si existen, y la evidencia del criterio 5 (capturas o marcas de tiempo de la grabación del video) con el resultado (aprobado o fallido) de los 8 criterios CA-01 a CA-08.
 
 ### Requirement 26: Llamadas del frontend a endpoints de TiendaDB
 
@@ -441,13 +467,32 @@ Contexto verificado de la pestaña local (con `VITE_ENABLE_TIENDADB_SCAN` no def
 
 **User Story:** Como líder del proyecto, quiero completar las secciones faltantes del documento fuente, para que el E2 tenga alcance, plan y proceso documentados.
 
-**Trazabilidad:** Documentación del E2, sin RF ni CA en la fuente · Tareas: tarea de documentación (sin T-xx en la fuente)
+**Trazabilidad:** Documentación del E2, sin RF ni CA en la fuente; el criterio 1 refleja el cambio de alcance registrado en Requirement 24, criterio 9 · Tareas: tarea de documentación (sin T-xx en la fuente)
 
 #### Acceptance Criteria
 
-1. THE Equipo SHALL redactar en `PgGuardian - Requisitos del Entregable 2 (AWS).md` una sección de alcance del E2.
+1. THE Equipo SHALL redactar en `PgGuardian - Requisitos del Entregable 2 (AWS).md` una sección de alcance del E2 que indique que el E2 es el despliegue en AWS y no el alcance multi-cliente original (registro de usuarios, entregado en el E1, y conexión a bases propias del cliente, que pasa a Mejoras futuras), según el Requirement 24, criterio 9, y que la evaluación se hace con un video que muestra el funcionamiento de la aplicación desde la URL pública.
 2. THE Equipo SHALL redactar en `PgGuardian - Requisitos del Entregable 2 (AWS).md` una sección de plan de trabajo.
 3. THE Equipo SHALL redactar en `PgGuardian - Requisitos del Entregable 2 (AWS).md` una sección de proceso estándar.
+
+### Requirement 29: Infraestructura como código con CloudFormation
+
+**User Story:** Como integrante del equipo, quiero crear la infraestructura AWS con una plantilla de CloudFormation, para crearla y borrarla de forma reproducible en un solo stack.
+
+**Trazabilidad:** Documento de cambios de la fuente (Debería) · Registro: Requirement 24, criterio 8 · Tareas: T-11 a T-15 y T-19 a T-21 (sus recursos pasan a la Plantilla_CFN), más las tareas de la plantilla, su despliegue y su borrado (sin T-xx en la fuente) · Criterios: los recursos se verifican con los criterios de R10, R12, R13, R14, R16, R17, R19.1, R20, R21 y R22
+
+#### Acceptance Criteria
+
+1. THE Plantilla_CFN SHALL crear en el Stack `pgguardian` el Rol_EC2 con su perfil de instancia, el Security_Group, la Instancia, el Volumen_Sandbox con un attachment en `/dev/sdf`, la Elastic_IP asociada a la Instancia, el Presupuesto, la Alarma_Recover y el monitor y la suscripción de Anomaly_Detection.
+2. THE Plantilla_CFN SHALL recibir la AMI de Ubuntu 24.04 en el parámetro `AmiId` (tipo `AWS::EC2::Image::Id`, sin valor por defecto) y SHALL NOT resolverla dentro de la plantilla. Antes del primer despliegue, THE Equipo SHALL obtener el ID con `aws ssm get-parameter --name /aws/service/canonical/ubuntu/server/24.04/stable/current/amd64/hvm/ebs-gp3/ami-id --query Parameter.Value --output text` y pasarlo como `AmiId`; en cada actualización SHALL pasar `AmiId` con `UsePreviousValue=true`. THE Plantilla_CFN SHALL crear el Volumen_Sandbox en la misma zona de disponibilidad que la Instancia y SHALL NOT definir `UserData` en la Instancia, de modo que la configuración del host quede en `scripts/aws/bootstrap_host.sh`.
+3. THE Plantilla_CFN SHALL declarar los parámetros `VpcId`, `SubnetId`, `AmiId` (sin valor por defecto), `Owner` (cadena de 1 a 256 caracteres), `AlertEmail` y `MonthlyBudgetUsd` (valor por defecto 30), y los outputs `InstanceId`, `PublicIp`, `AppDomain` (la dirección de la Elastic_IP con los octetos separados por guiones, seguida de `.sslip.io`) y `SandboxVolumeId`.
+4. THE Plantilla_CFN SHALL asignar las etiquetas `Project=PgGuardian`, `Env=prod` y `Owner` a la Instancia, al disco raíz (mediante `PropagateTagsToVolumeOnCreation: true`), al Volumen_Sandbox y a la Elastic_IP.
+5. THE Plantilla_CFN SHALL NOT crear los Usuario_IAM, el Grupo_Admins, la Politica_Force_MFA ni los Snapshot_Manual. Esos elementos, la configuración del host, el `.env`, el despliegue de la aplicación, el Secreto_Huerfano, ZAP y `nmap` siguen fuera de la plantilla.
+6. WHEN el Equipo crea o modifica la Plantilla_CFN, THE Plantilla_CFN SHALL pasar `cfn-lint` sin errores y `aws cloudformation validate-template` sin errores antes de desplegarse.
+7. WHEN el Equipo crea o actualiza el Stack, THE Equipo SHALL hacerlo con un change set (`aws cloudformation create-change-set`), revisar con `aws cloudformation describe-change-set` los recursos que se agregan, modifican o reemplazan, y ejecutarlo con `aws cloudformation execute-change-set` solo después de esa revisión.
+8. WHEN el Stack queda en estado `CREATE_COMPLETE`, THE Stack SHALL tener activada la protección contra terminación (`EnableTerminationProtection=true`), verificable con `aws cloudformation describe-stacks --stack-name pgguardian`.
+9. THE Equipo SHALL documentar en `docs/aws/runbook.md` el borrado del Stack en este orden: desactivar la protección contra terminación del Stack, desactivar `DisableApiTermination` de la Instancia, tomar un Snapshot_Manual del disco raíz y uno del Volumen_Sandbox hasta que estén en estado `completed`, y ejecutar `aws cloudformation delete-stack --stack-name pgguardian`.
+10. IF el despliegue del Stack falla en el monitor o en la suscripción de Anomaly_Detection, THEN THE Equipo SHALL quitar esos dos recursos de la Plantilla_CFN, volver a desplegar el Stack y crearlos con `scripts/aws/create_anomaly_detection.sh`, de modo que el Requirement 21 se siga cumpliendo.
 
 ## Matriz de trazabilidad RF → T → CA
 
@@ -474,8 +519,9 @@ Contexto verificado de la pestaña local (con `VITE_ENABLE_TIENDADB_SCAN` no def
 | RF-06.7 | Debería | 18 | T-16 | CA-22 |
 | RF-06.8 | Podría | 19 | T-18 | CA-23 |
 | RF-03.1, RF-03.4, RF-03.5 (E1) | Debe | 19 | T-15, T-17, T-18 | CA-23 |
+| RF-03.6 (E1, sustituido) | n/a | 24 (criterio 3), 19 (criterio 8), 20 | T-26, T-19, sección «Encender y detener» del runbook (sin T-xx) | CA-23, CA-24, CA-27 |
 | RF-07.1 | Debe | 20 | T-19 | CA-24 |
-| RF-07.2 | Debería | 21 | T-20 | CA-24 |
+| RF-07.2 | Debería | 21 (desviación de 21.2: 24) | T-20 | CA-24 |
 | RF-07.3 | Debería | 22 | T-21 | CA-25 |
 | RF-07.4 | Debe | 23 (desviación: 24) | T-22, T-27 | CA-26 |
 | RF-08.1 | Debe | 24 | T-26 | CA-27 |
@@ -483,6 +529,8 @@ Contexto verificado de la pestaña local (con `VITE_ENABLE_TIENDADB_SCAN` no def
 | Hallazgo del despliegue | n/a | 26 (registro: 24) | Fase 1 (sin T-xx) | n/a |
 | Limpieza de la cuenta | n/a | 27 | Manual (sin T-xx) | n/a |
 | Documentación del E2 | n/a | 28 | Documentación (sin T-xx) | n/a |
+| Alcance del E2 (práctica de definición de requisitos) | n/a | 24 (criterio 9), 28 (criterio 1), Mejoras futuras | T-26, documentación (sin T-xx) | n/a |
+| Infraestructura como código (documento de cambios) | Debería | 29 (registro: 24) | T-11 a T-15, T-19 a T-21 (recursos de la plantilla); plantilla, despliegue y borrado (sin T-xx) | Los de R10, R12 a R14, R16, R17, R19.1 y R20 a R22 |
 | Sección 6 (pendientes) | n/a | Mejoras futuras | n/a | n/a |
 
 Cobertura: las 27 tareas (T-01 a T-27) y los 19 criterios (CA-09 a CA-27) aparecen al menos una vez en la matriz.
@@ -491,6 +539,7 @@ Cobertura: las 27 tareas (T-01 a T-27) y los 19 criterios (CA-09 a CA-27) aparec
 
 Elementos de la fuente que se retiraron de esta versión. Cada uno podría retomarse si el Equipo dispone de tiempo o si cambian las condiciones del proyecto.
 
+- **Conexión a bases propias del cliente:** registrar una base PostgreSQL del cliente con una credencial de solo lectura y auditarla de forma continua, en lugar de analizar scripts en el sandbox. Era el alcance original del E2 (R24.9).
 - **Grupo de operadores (sección 6 de la fuente):** grupo IAM con permisos limitados a reiniciar la Instancia e iniciar sesiones de Session Manager sobre recursos con `Project=PgGuardian`, con verificación de que otras acciones se deniegan y quedan en CloudTrail. Podría retomarse si se suman integrantes que no deban ser administradores.
 - **`pg_dump` periódico de App_DB (sección 6 de la fuente):** copia lógica cada 24 horas con retención de 7 días y aviso de fallo en 15 minutos. Podría retomarse para tener respaldos de App_DB independientes del disco raíz, ya que `app_db` guarda sus datos en el volumen `pgguardian_app_data` dentro del disco raíz y no tiene volumen propio.
 - **Prueba de restauración del snapshot del Volumen_Sandbox (antes R23.4):** restaurar el snapshot de 8 GB en un volumen nuevo, levantar un PostgreSQL temporal y comparar el conteo de filas de una tabla marcador. Podría retomarse para demostrar que los snapshots son restaurables, no solo que están en `completed`.
