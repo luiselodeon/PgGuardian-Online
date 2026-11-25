@@ -38,7 +38,7 @@ Las páginas `BloatPage`, `ConfigPage`, `HealthPage`, `IndexesPage` y `QueriesPa
 - `frontend/src/pages/Overview.jsx`: con la bandera desactivada, el mensaje sin datos remite a «Nuevo análisis» en lugar de a «Ejecutar Escaneo».
 - `frontend/.env.development`: define `VITE_ENABLE_TIENDADB_SCAN=true`. Vite solo carga este archivo en modo desarrollo (`npm run dev`, contenedor `frontend` de `docker-compose.yml`), así que el entorno con TiendaDB conserva el escaneo y `vite build` no lo lee.
 
-**Comprobación del build.** Tras `npm run build` (modo producción), el bundle `dist/assets/index-*.js` contiene 0 apariciones de `/full-scan`, `/bloat/`, `/config/`, `/health/`, `/indexes/`, `/queries/` y del texto «Ejecutar Escaneo»: Vite elimina ese código como inalcanzable. Un build con `--mode development` sí contiene `/full-scan`. La verificación en navegador de R26.3 (pestaña Red con 0 solicitudes a esos prefijos al recorrer login, registro y análisis) queda para el despliegue.
+**Comprobación del build.** Tras `npm run build` (modo producción), el bundle `dist/assets/index-*.js` contiene 0 apariciones de `/full-scan`, `/bloat/`, `/config/`, `/health/`, `/indexes/`, `/queries/` y del texto «Ejecutar Escaneo»: Vite elimina ese código como inalcanzable. Un build con `--mode development` sí contiene `/full-scan`. La verificación en navegador de R26.3 se hizo en local el 2026-11-24 con el build de producción: aprobada, ver la sección de R26.3 al final de esta entrada y docs/aws/evidencia/r26-3/.
 
 **Nota: pestaña local y etiqueta TiendaDB ocultas en producción (tarea 1.11, R26.4 a R26.7).**
 
