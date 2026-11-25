@@ -17,7 +17,7 @@ Este diseño describe cómo cumplir los 29 requisitos de `requirements.md` para 
 | Capa | Qué se cambia | Requisitos |
 | --- | --- | --- |
 | Código y configuración del repositorio | `docker-compose.prod.yml`, `Caddyfile`, `backend/api` (health-check), `frontend/src` (llamadas a TiendaDB) | R1 a R7, R26 |
-| Infraestructura AWS | Plantilla de CloudFormation `infra/cloudformation/pgguardian.yaml`, desplegada desde CloudShell en el stack `pgguardian` (C15): rol EC2, Security Group, EC2, EBS, Elastic IP, Budgets, Cost Anomaly Detection y la alarma de CloudWatch. Fuera de la plantilla, con scripts: usuarios IAM, host, `.env`, despliegue de la aplicación y snapshots manuales de EBS | R8 a R23, R29 |
+| Infraestructura AWS | Plantilla de CloudFormation `infra/cloudformation/pgguardian.yaml`, desplegada desde CloudShell en el stack `pgguardian` (C15): rol EC2, Security Group, EC2, EBS, Elastic IP, Budgets, Cost Anomaly Detection y la alarma de CloudWatch. Fuera de la plantilla: usuarios IAM, creados en la consola según el runbook, y, con scripts, host, `.env`, despliegue de la aplicación y snapshots manuales de EBS | R8 a R23, R29 |
 | Procesos, documentación y evidencia | Registro de decisiones, paquete de evidencia, limpieza de Secrets Manager, secciones del documento fuente | R24, R25, R27, R28 |
 
 **Investigación que informa el diseño** (el contenido se parafrasea de la documentación oficial):
@@ -103,7 +103,7 @@ flowchart LR
 | Sin SSH ni `.pem`; solo Session Manager | Las IP domésticas cambian, y se evita repartir llaves y abrir el puerto 22. Reemplaza RF-03.3 del E1. | R11, R12, R24.2 |
 | Disco EBS dedicado al sandbox | Un script con `generate_series` que llene el disco no debe tumbar `app_db`. Refuerza RF-01.4. | R4, R14, R24.1 |
 | `mem_limit` por contenedor (suma 1408 MiB) | Deja al menos 600 MiB del total de 2048 MiB para SO y Docker. | R3 |
-| Infraestructura con una plantilla de CloudFormation desplegada desde CloudShell | Creación y borrado reproducibles en un solo stack; herramienta vista en el curso; estaba como «Debería» en el documento de cambios. Los recursos que la plantilla no cubre (usuarios IAM, host, despliegue, snapshots) siguen en `scripts/aws/` y las verificaciones en `docs/aws/runbook.md` (C14, C15). | R29, R24.8 |
+| Infraestructura con una plantilla de CloudFormation desplegada desde CloudShell | Creación y borrado reproducibles en un solo stack; herramienta vista en el curso; estaba como «Debería» en el documento de cambios. De lo que la plantilla no cubre, los usuarios IAM se crean en la consola según el runbook; el host, el despliegue y los snapshots siguen en `scripts/aws/`, y las verificaciones en `docs/aws/runbook.md` (C14, C15). | R29, R24.8 |
 | Presupuesto de 30 USD/mes sin créditos, con 4 alertas | El costo 24/7 estimado de 22 USD al mes cabe en los créditos. Se mide el gasto bruto porque con créditos descontados el gasto sería 0 USD. Avisa si el gasto se desvía con la política de encendido de R24.3. | R20, R24.3 |
 | Encender y detener la instancia a criterio del Equipo (sustituye RF-03.6) | El peor caso (24/7, unos 22 USD al mes) cabe en los créditos de 100 USD y el Presupuesto avisa si el gasto se desvía. La evaluación es con un video grabado, así que no hace falta disponibilidad 24/7. Tras cada inicio la aplicación vuelve sola por la misma URL HTTPS (C8). | R19.8, R24.3 |
 | Dos snapshots manuales por disco, sin DLM ni prueba de restauración | Basta con un punto de recuperación al estabilizar y otro antes de la grabación del video; evita configurar y pagar una política diaria. | R23, R24.4 |
@@ -286,7 +286,8 @@ Esqueleto de `Force_MFA`:
       "iam:ChangePassword", "iam:GetUser",
       "iam:CreateVirtualMFADevice", "iam:EnableMFADevice",
       "iam:ListMFADevices", "iam:ListVirtualMFADevices",
-      "iam:ResyncMFADevice", "sts:GetSessionToken"
+      "iam:GetMFADevice", "iam:ResyncMFADevice",
+      "iam:GetAccountPasswordPolicy", "sts:GetSessionToken"
     ],
     "Resource": "*",
     "Condition": { "BoolIfExists": { "aws:MultiFactorAuthPresent": "false" } }
@@ -294,7 +295,7 @@ Esqueleto de `Force_MFA`:
 }
 ```
 
-Los usuarios IAM, `PgG-Admins` y `Force_MFA` quedan fuera de la plantilla y se crean con `scripts/aws/setup_iam.sh` (T-10).
+Los usuarios IAM, `PgG-Admins` y `Force_MFA` quedan fuera de la plantilla y se crean manualmente en la consola siguiendo la sección raíz/IAM del runbook (T-10).
 
 Las acciones IAM de autogestión deben limitarse además al propio usuario mediante `arn:aws:iam::<cuenta>:user/${aws:username}` en una declaración `Allow` separada.
 
@@ -492,7 +493,7 @@ Los recursos AWS del despliegue los crea la plantilla (C15). Solo son obligatori
 | Tipo | Archivos |
 | --- | --- |
 | Plantilla de infraestructura | `infra/cloudformation/pgguardian.yaml` (stack `pgguardian`, C15) |
-| Scripts de creación (`scripts/aws/`) | `setup_iam.sh`, `bootstrap_host.sh`, `make_env.sh`, `deploy.sh`, `manual_snapshot.sh` |
+| Scripts de creación (`scripts/aws/`) | `bootstrap_host.sh`, `make_env.sh`, `deploy.sh`, `manual_snapshot.sh` |
 | Script de respaldo (`scripts/aws/`) | `create_anomaly_detection.sh`, que solo se escribe si se activa el plan B de C15 |
 | Scripts de evidencia (`scripts/aws/`) | `run_zap.sh`, `run_nmap.sh` |
 | Verificación local (Fase 1) | `scripts/verify_phase1.sh` / `.ps1` (C4) |

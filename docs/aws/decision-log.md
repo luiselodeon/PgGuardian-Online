@@ -67,3 +67,27 @@ Resultado de la verificación (2026-11-24):
 - Solicitudes a `/api/full-scan`, `/api/bloat`, `/api/config`, `/api/health/`, `/api/indexes` y `/api/queries`: 0. Ninguna solicitud durante los 35 s de inactividad.
 - Resultado: **aprobado**.
 - Evidencia: `docs/aws/evidencia/r26-3/`, con `r26-3.har` (HAR de las solicitudes `/api/`, sin cabeceras `Authorization`, `Cookie` ni `Set-Cookie` y sin los cuerpos de `/api/auth/*`), `solicitudes-api.json` (método, ruta, código y tiempo de cada solicitud, con los pasos del flujo), `red-final.png` (ventana con la pestaña Red al final del flujo) y `pagina-final.png` (vista del Historial). La pestaña Red de la captura muestra 7 solicitudes porque el primer `GET /api/auth/me` ocurrió antes de que DevTools empezara a registrar; la lista completa está en el HAR y en el JSON.
+
+### Decisión de diseño de T-10: usuarios IAM creados en la consola
+
+Esta entrada no corresponde a ninguno de los criterios R24.1 a R24.10: registra un cambio del diseño, no una desviación de la fuente. Usa los mismos campos y la misma regla de aprobación (R24.11, R24.12).
+
+| Campo | Valor |
+| --- | --- |
+| `requisito_afectado` | T-10 (RF-05.2, RF-05.3; Requirement 9). Cambia la forma de crear los recursos, no los criterios de verificación. |
+| `cambio` | Los usuarios IAM, el grupo `PgG-Admins` y la política `Force_MFA` se crean a mano en la consola, como raíz y una sola vez, siguiendo la sección raíz/IAM de `docs/aws/runbook.md`. Se quita `scripts/aws/setup_iam.sh` de la lista de scripts de C14 del diseño. |
+| `justificacion` | Con pocos usuarios, la consola evita dejar contraseñas en el historial de la shell, y la contraseña de acceso a la consola tiene que asignarse ahí de todas formas. |
+| `fecha` | 2026-11-25 |
+| `aprobador` | *pendiente* (se anota en la especificación en un máximo de 2 días hábiles, R24.11) |
+
+### Monitor de anomalías por defecto reemplazado por el del stack
+
+Esta entrada no corresponde a ninguno de los criterios R24.1 a R24.10: registra un cambio del diseño, no una desviación de la fuente. Usa los mismos campos y la misma regla de aprobación (R24.11, R24.12).
+
+| Campo | Valor |
+| --- | --- |
+| `requisito_afectado` | R21 / RF-07.2 (Cost Anomaly Detection) y R29 (stack `pgguardian`). Cambia el estado previo de la cuenta, no los criterios de verificación. |
+| `cambio` | Antes del primer despliegue del stack se borran el monitor de servicios por defecto de la cuenta (`Default-Services-Monitor`) y su suscripción (`Default-Services-Subscription`, umbral 100 USD y 40 %), después de guardar como evidencia la salida de `get-anomaly-monitors` y `get-anomaly-subscriptions`. Su lugar lo ocupa el monitor `DIMENSIONAL` de servicio del stack (o el de `scripts/aws/create_anomaly_detection.sh` si se activa el plan B). Al borrar el stack, la cuenta queda sin monitor de anomalías. |
+| `justificacion` | AWS permite un solo monitor de servicios por cuenta, así que el del stack no puede crearse mientras exista el por defecto. Además, el umbral por defecto (100 USD y 40 %) no avisaría con el gasto esperado, de unos 22 USD al mes. |
+| `fecha` | 2026-11-25 |
+| `aprobador` | *pendiente* (se anota en la especificación en un máximo de 2 días hábiles, R24.11) |

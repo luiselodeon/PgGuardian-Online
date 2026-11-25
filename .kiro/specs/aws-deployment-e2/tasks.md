@@ -4,7 +4,7 @@
 
 Este plan convierte el diseño (componentes C1 a C15) en tareas de código, scripts y documentos versionados. Conserva la numeración T-01 a T-27 de la fuente y la cadena de trazabilidad RF → T → CA. Cada sub-tarea indica su T-xx, y cada línea `_Requirements_` cita los Requirement (R1 a R29) de `requirements.md`, junto con los RF y CA que cubre. Las tareas sin T-xx en la fuente (R26 a R29) se indican como tales.
 
-La infraestructura AWS se define en la plantilla de CloudFormation `infra/cloudformation/pgguardian.yaml` (C15), desplegada desde CloudShell como el stack `pgguardian`. Lo que la plantilla no cubre (usuarios IAM, host, `.env`, despliegue de la aplicación y snapshots) sigue en los scripts de `scripts/aws/` (lista de C14). Las verificaciones no son scripts: son comandos dentro de un único documento, `docs/aws/runbook.md`, con las secciones raíz/IAM, stack, instancia, host, despliegue, encender y detener, costos y snapshots. La tarea 4.1 crea ese documento con sus ocho secciones y las demás tareas lo amplían en olas distintas. El despliegue y el borrado del stack, la ejecución de los scripts en la cuenta AWS y la captura de evidencia manual (capturas, video, MFA físico) los hace el Equipo con esos artefactos.
+La infraestructura AWS se define en la plantilla de CloudFormation `infra/cloudformation/pgguardian.yaml` (C15), desplegada desde CloudShell como el stack `pgguardian`. Los usuarios IAM se crean en la consola siguiendo la sección raíz/IAM del runbook (tarea 4.2). El resto de lo que la plantilla no cubre (host, `.env`, despliegue de la aplicación y snapshots) sigue en los scripts de `scripts/aws/` (lista de C14). Las verificaciones no son scripts: son comandos dentro de un único documento, `docs/aws/runbook.md`, con las secciones raíz/IAM, stack, instancia, host, despliegue, encender y detener, costos y snapshots. La tarea 4.1 crea ese documento con sus ocho secciones y las demás tareas lo amplían en olas distintas. El despliegue y el borrado del stack, la ejecución de los scripts en la cuenta AWS y la captura de evidencia manual (capturas, video, MFA físico) los hace el Equipo con esos artefactos.
 
 Lenguajes: Python (FastAPI, unittest), JavaScript (React/Vite), YAML (Compose y CloudFormation), Caddyfile, Bash y PowerShell, JSON (políticas IAM, CLI de AWS), Markdown.
 
@@ -95,15 +95,27 @@ Lenguajes: Python (FastAPI, unittest), JavaScript (React/Vite), YAML (Compose y 
   - Ensure all tests pass, ask the user if questions arise.
 
 - [ ] 4. Fase 2: cuenta e IAM (T-09, T-10, T-11)
-  - [ ] 4.1 T-09: Runbook y verificación de la cuenta raíz
+  - [x] 4.1 T-09: Runbook y verificación de la cuenta raíz
     - Crear `docs/aws/runbook.md` con las ocho secciones (raíz/IAM, stack, instancia, host, despliegue, encender y detener, costos, snapshots) y el formato común de «Resultado de verificación» (`criterio`, `requisito`, `estado` `aprobado|no_aprobado|no_verificable`, `detalle`).
     - En la sección raíz/IAM: los pasos manuales de MFA de la cuenta raíz y de acceso IAM a facturación, y los comandos de verificación con `aws iam get-account-summary`. Aprobado solo con `AccountMFAEnabled=1` y `AccountAccessKeysPresent=0`; no conforme indicando la condición fallida; no verificable con la causa si la consulta falla o falta un valor. La verificación no modifica la cuenta.
     - _RF-05.1 · CA-15 · Requirements: 8.1, 8.2, 8.3, 8.4, 8.5, 8.6_
 
-  - [ ] 4.2 T-10: Usuarios IAM, grupo `PgG-Admins` y política `Force_MFA`
-    - Crear `docs/aws/iam/force-mfa-policy.json` (Deny con `NotAction` y `BoolIfExists aws:MultiFactorAuthPresent=false`, más `Allow` de autogestión limitado a `${aws:username}`).
-    - Crear `scripts/aws/setup_iam.sh`: un usuario por integrante sin access keys, y grupo `PgG-Admins` con `AdministratorAccess` y `Force_MFA`, cuyos miembros son los integrantes del Equipo (lista recibida como parámetro).
-    - Añadir a la sección raíz/IAM de `docs/aws/runbook.md` los comandos de verificación: reporte de credenciales (`generate-credential-report`; 100 % con `mfa_active=true` y claves en `false`), revisión de la definición de `Force_MFA` adjunta a `PgG-Admins` (`list-attached-group-policies` + `get-policy-version`), y una acción permitida con MFA sin `AccessDenied`. CA-16 se verifica así, sin usuario de prueba sin MFA.
+  - [x] 4.2 T-10: Usuarios IAM, grupo `PgG-Admins` y política `Force_MFA`
+    - Crear `docs/aws/iam/force-mfa-policy.json`:
+      - Una sentencia `Deny` con `NotAction` y `BoolIfExists aws:MultiFactorAuthPresent=false`.
+      - El `NotAction` excluye lo que el usuario necesita antes de tener MFA: `iam:CreateVirtualMFADevice`, `iam:EnableMFADevice`, `iam:ListMFADevices`, `iam:GetMFADevice`, `iam:ListVirtualMFADevices`, `iam:ResyncMFADevice`, `iam:GetUser`, `iam:ChangePassword`, `iam:GetAccountPasswordPolicy` y `sts:GetSessionToken` (10 acciones). `iam:GetMFADevice` va también en el `Action` del `Allow`.
+      - Una sentencia `Allow` de autogestión limitada a `${aws:username}`.
+    - Sin script: añadir a la sección raíz/IAM de `docs/aws/runbook.md` los pasos de consola, ejecutados como raíz una sola vez:
+      1. Crear la política administrada `Force_MFA` pegando el JSON.
+      2. Crear el grupo `PgG-Admins` con `AdministratorAccess` y `Force_MFA`.
+      3. Crear un usuario por integrante del Equipo, con acceso a la consola, contraseña autogenerada por AWS, cambio obligatorio en el primer inicio de sesión, miembro de `PgG-Admins` y sin access keys.
+      4. Cada integrante inicia sesión, cambia su contraseña y registra su MFA.
+      5. A partir de aquí, la raíz no se usa para operar.
+    - Añadir a la misma sección los comandos de verificación, ejecutados en CloudShell con un usuario IAM:
+      - El reporte de credenciales (`generate-credential-report`): 100 % de usuarios con `mfa_active=true` y claves en `false`.
+      - La revisión de la definición de `Force_MFA` adjunta a `PgG-Admins` (`list-attached-group-policies` + `get-policy-version`).
+      - Una acción permitida con MFA, sin `AccessDenied`.
+      - CA-16 se verifica así, sin usuario de prueba sin MFA.
     - _RF-05.2, RF-05.3 · CA-15, CA-16 · Requirements: 9.1, 9.2, 9.3, 9.4, 9.5, 9.6_
 
   - [ ] 4.3 T-11: Verificación del rol `PgGuardian-EC2-Role`
@@ -130,6 +142,7 @@ Lenguajes: Python (FastAPI, unittest), JavaScript (React/Vite), YAML (Compose y 
 
   - [ ] 5.2 Runbook: despliegue del stack con change set y lectura de outputs
     - Añadir a la sección stack de `docs/aws/runbook.md` el procedimiento de C15: `cfn-lint` y `validate-template`; solo antes del primer despliegue, `aws ssm get-parameter --name /aws/service/canonical/ubuntu/server/24.04/stable/current/amd64/hvm/ebs-gp3/ami-id --query Parameter.Value --output text` para obtener el ID de la AMI; `aws cloudformation create-change-set --stack-name pgguardian --change-set-type CREATE --capabilities CAPABILITY_NAMED_IAM` con los cinco parámetros obligatorios, ese ID como `AmiId`; `wait change-set-create-complete`; revisión con `describe-change-set` (acción, recurso lógico, tipo y `Replacement`); `execute-change-set` solo después de la revisión; `wait stack-create-complete`; `update-termination-protection --enable-termination-protection`; y `describe-stacks` con `EnableTerminationProtection=true`.
+    - Comprobación previa al primer despliegue, antes de `create-change-set` (AWS permite un solo monitor de anomalías de servicios por cuenta): `aws ce get-anomaly-monitors --query "AnomalyMonitors[?MonitorType=='DIMENSIONAL']"`. Si existe uno (en esta cuenta, `Default-Services-Monitor`, con `Default-Services-Subscription` de umbral 100 USD y 40 %), guardar primero como evidencia en `docs/aws/evidencia/` la salida de ese comando y la de `aws ce get-anomaly-subscriptions --monitor-arn <arn>`; después borrar sus suscripciones con `aws ce delete-anomaly-subscription --subscription-arn <arn>` y, al final, el monitor con `aws ce delete-anomaly-monitor --monitor-arn <arn>`. Repetir la primera consulta y confirmar que devuelve una lista vacía. Decisión registrada en `docs/aws/decision-log.md` («Monitor de anomalías por defecto reemplazado por el del stack»).
     - Actualizaciones: mismo procedimiento con `--change-set-type UPDATE` y `ParameterKey=AmiId,UsePreviousValue=true` (y `UsePreviousValue=true` en los demás parámetros que no cambian); como segunda barrera, no ejecutar el change set si `Instance` aparece con `Replacement=True`.
     - Lectura de outputs: `aws cloudformation describe-stacks --stack-name pgguardian --query "Stacks[0].Outputs"`, con `InstanceId`, `PublicIp`, `AppDomain` y `SandboxVolumeId`, que usan las tareas 5.3, 6.1, 6.2, 6.4 y 7.4.
     - Plan B de Cost Anomaly Detection: si el despliegue falla en `CostAnomalyMonitor` o `CostAnomalySubscription`, quitar ambos recursos de la plantilla, volver a desplegar el stack y crearlos con `scripts/aws/create_anomaly_detection.sh` (tarea 7.2). Si el rollback queda en `ROLLBACK_FAILED` porque `DisableApiTermination` impide terminar la instancia, obtener su ID con `describe-stack-resources`, ejecutar `aws ec2 modify-instance-attribute --no-disable-api-termination` y borrar el stack antes de repetir.
@@ -147,7 +160,7 @@ Lenguajes: Python (FastAPI, unittest), JavaScript (React/Vite), YAML (Compose y 
 
   - [ ] 5.4 Runbook: borrado del stack
     - Añadir a la sección stack de `docs/aws/runbook.md` el procedimiento de C15, en este orden: `aws cloudformation update-termination-protection --no-enable-termination-protection --stack-name pgguardian`; `aws ec2 modify-instance-attribute --instance-id <InstanceId> --no-disable-api-termination`; un snapshot del disco raíz y uno del Volumen_Sandbox con `scripts/aws/manual_snapshot.sh` (tarea 7.4), ambos en `completed`; `aws cloudformation delete-stack --stack-name pgguardian` y `aws cloudformation wait stack-delete-complete --stack-name pgguardian`.
-    - Indicar que el borrado elimina la instancia, los dos discos, la Elastic IP, el rol, el Security Group, el presupuesto, la alarma y las anomalías, y que los snapshots se conservan porque no pertenecen al stack.
+    - Indicar que el borrado elimina la instancia, los dos discos, la Elastic IP, el rol, el Security Group, el presupuesto, la alarma y las anomalías, y que los snapshots se conservan porque no pertenecen al stack. Anotar también que, al borrar el stack, la cuenta queda sin monitor de anomalías (el por defecto se borró en la comprobación previa de la tarea 5.2) y que, si la cuenta sigue en uso, se puede volver a crear uno de servicios desde la consola de Cost Anomaly Detection.
     - _Requirements: 23.3, 29.8, 29.9_
 
 - [ ] 6. Fase 4: host y despliegue (T-16 a T-18)
@@ -187,7 +200,7 @@ Lenguajes: Python (FastAPI, unittest), JavaScript (React/Vite), YAML (Compose y 
 
   - [ ] 7.2 T-20: Verificación de Cost Anomaly Detection
     - El monitor y la suscripción los crea la plantilla (tarea 5.1); esta tarea añade sus verificaciones.
-    - Solo si se activa el plan B de la tarea 5.2: crear `scripts/aws/create_anomaly_detection.sh` con el mismo monitor `DIMENSIONAL` de servicio y la suscripción `DAILY` por correo con la misma `ThresholdExpression` que la plantilla, y anotar en la sección costos que esos dos recursos quedan fuera del stack.
+    - Solo si se activa el plan B de la tarea 5.2: crear `scripts/aws/create_anomaly_detection.sh` con el mismo monitor `DIMENSIONAL` de servicio y la suscripción `DAILY` por correo con la misma `ThresholdExpression` que la plantilla, y anotar en la sección costos que esos dos recursos quedan fuera del stack. Antes de crear el monitor, el script hace la misma comprobación previa de la tarea 5.2: busca un monitor `DIMENSIONAL` con `get-anomaly-monitors`, guarda como evidencia la salida de ese comando y la de `get-anomaly-subscriptions`, borra las suscripciones y después el monitor.
     - Añadir a la sección costos de `docs/aws/runbook.md` la verificación con `get-anomaly-monitors` y `get-anomaly-subscriptions`.
     - _RF-07.2 · CA-24 · Requirements: 21.1, 21.2, 21.3, 21.4, 29.10_
 
@@ -227,7 +240,7 @@ Lenguajes: Python (FastAPI, unittest), JavaScript (React/Vite), YAML (Compose y 
     - _RF-08.2 · CA-01 a CA-08, CA-27 · Requirements: 25.5, 25.6_
 
   - [ ] 9.4 T-26: Registro de decisiones
-    - Completar `docs/aws/decision-log.md` (creado en la tarea 1.10 con la entrada R24.7) hasta tener diez entradas con los campos `requisito_afectado`, `cambio`, `justificacion`, `fecha` AAAA-MM-DD y `aprobador`:
+    - Completar `docs/aws/decision-log.md` (creado en la tarea 1.10 con la entrada R24.7 y ampliado en la tarea 4.2 con la decisión de diseño de T-10) hasta tener las diez entradas de R24.1 a R24.10, además de esa decisión, con los campos `requisito_afectado`, `cambio`, `justificacion`, `fecha` AAAA-MM-DD y `aprobador`:
       - R24.1: RF-01.4, disco propio del sandbox, justificación «un script que llena el disco no puede tumbar `app_db`».
       - R24.2: RF-03.3, Session Manager con el puerto 22 cerrado, justificación «las IP domésticas cambian».
       - R24.3 (sustituye a RF-03.6): `cambio` «la instancia se enciende o se detiene a criterio del Equipo; no es requisito que esté disponible 24/7 ni que se detenga fuera de las demostraciones»; `justificacion` «el peor caso (24/7, unos 22 USD al mes) cabe en los créditos de 100 USD, y el Presupuesto (R20) avisa si el gasto se desvía. La evaluación se hace con un video grabado, no con acceso en vivo».
