@@ -91,7 +91,7 @@ Lenguajes: Python (FastAPI, unittest), JavaScript (React/Vite), YAML (Compose), 
     - Añadir una plantilla de descripción de PR con el resultado de cada criterio.
     - _RNF-05 · CA-09 a CA-14 · Requirements: 7.1, 7.2, 7.3, 7.4, 7.5, 7.6, 7.7, 7.8_
 
-- [ ] 3. Checkpoint: Fase 1
+- [x] 3. Checkpoint: Fase 1
   - Ensure all tests pass, ask the user if questions arise.
 
 - [ ] 4. Fase 2: cuenta e IAM (T-09, T-10, T-11)
