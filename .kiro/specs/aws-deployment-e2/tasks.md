@@ -11,19 +11,19 @@ Lenguajes: Python (FastAPI, unittest), JavaScript (React/Vite), YAML (Compose), 
 ## Tasks
 
 - [ ] 1. Fase 1: cambios de código y configuración (T-01 a T-07 y frontend)
-  - [ ] 1.1 T-01: Hacer obligatorio `JWT_SECRET` en `docker-compose.prod.yml`
+  - [x] 1.1 T-01: Hacer obligatorio `JWT_SECRET` en `docker-compose.prod.yml`
     - Cambiar `JWT_SECRET: ${JWT_SECRET}` del servicio `api` por `${JWT_SECRET:?falta JWT_SECRET}`.
     - _RF-04.1 · CA-09 · Requirements: 1.1, 1.2, 1.3_
 
-  - [ ] 1.2 T-02: Rotación de logs con `x-logging`
+  - [x] 1.2 T-02: Rotación de logs con `x-logging`
     - Definir el ancla `x-logging: &logging` (`json-file`, `max-size: "10m"`, `max-file: "3"`) y referenciarla con `logging: *logging` en los cinco servicios, sin bloques propios.
     - _RF-04.2 · CA-10 · Requirements: 2.1, 2.2, 2.4_
 
-  - [ ] 1.3 T-03: Límites de memoria
+  - [x] 1.3 T-03: Límites de memoria
     - Añadir `mem_limit` de `512m` a `sandbox_db`, `384m` a `app_db` y `512m` a `api` (suma 1408 MiB).
     - _RF-04.3 · CA-11 · Requirements: 3.1, 3.2, 3.3, 3.6_
 
-  - [ ] 1.4 T-04: Bind mount del disco propio del sandbox
+  - [x] 1.4 T-04: Bind mount del disco propio del sandbox
     - Reemplazar el volumen `sandbox_data` de `sandbox_db` por un bind mount en sintaxis larga: `type: bind`, `source: ${SANDBOX_DATA_DIR:-./.data/sandbox}`, `target: /var/lib/postgresql/data` y `bind: { create_host_path: false }`. Eliminar `sandbox_data` de `volumes:`. No usar la sintaxis corta ni la ruta fija `/srv/sandbox/pgdata` en el compose: esa ruta solo existe en la EC2, y en Windows con Docker Desktop terminaría dentro de la VM de Docker (T-08 corre en local).
     - Motivo de `create_host_path: false`: con la sintaxis corta, si el disco no se montó, Docker crea `/srv/sandbox/pgdata` en el disco raíz y PostgreSQL escribe allí sin aviso. Los contenedores con `restart: unless-stopped` se levantan solos sin pasar por systemd, así que esta opción es la protección real. Con ella, Docker se niega a iniciar `sandbox_db` si el directorio de origen no existe, y no lo crea.
     - Consecuencia local: Docker ya no crea `./.data/sandbox`; lo crea el script de T-08 (tarea 2.1).
@@ -32,12 +32,12 @@ Lenguajes: Python (FastAPI, unittest), JavaScript (React/Vite), YAML (Compose), 
     - Añadir `SANDBOX_DATA_DIR=/srv/sandbox/pgdata` a `.env.prod.example`, con un comentario que indique que es obligatoria en producción (sin ella los datos quedan en el disco raíz) y que en local se omite.
     - _RF-04.4 · CA-12 · Requirements: 4.1, 4.2, 4.3, 4.4, 4.8_
 
-  - [ ] 1.5 T-05: Cabeceras de seguridad en `Caddyfile`
+  - [x] 1.5 T-05: Cabeceras de seguridad en `Caddyfile`
     - Añadir en el bloque `header` HSTS, `X-Content-Type-Options`, `X-Frame-Options`, `Referrer-Policy`, la CSP inicial exacta y `-Server`.
     - Evitar duplicados con el operador de reemplazo (`>`) si el upstream repite una cabecera.
     - _RF-04.5 · CA-13 · Requirements: 5.1, 5.2, 5.3, 5.6_
 
-  - [ ] 1.6 T-06: Ajustar la CSP según el build de producción del frontend
+  - [x] 1.6 T-06: Ajustar la CSP según el build de producción del frontend
     - Crear `docs/aws/csp-verificacion.md` con el procedimiento (login, registro, análisis, consola con 0 violaciones) y la tabla donde registrar cada directiva ampliada.
     - Ampliar la CSP del `Caddyfile` solo con las directivas de la fuente bloqueada, si se observan violaciones.
     - _RF-04.5 · CA-13 · Requirements: 5.4, 5.5_

@@ -1,15 +1,44 @@
 # PgGuardian — Reverse proxy de producción (RF-03.2 / RF-03.4)
 # En EC2 define APP_DOMAIN=<IP-con-guiones>.sslip.io (o subdominio DuckDNS) en .env
 # para obtener HTTPS automático vía Let's Encrypt; usa ":80" para modo HTTP.
-{$APP_DOMAIN::80} {
-    encode gzip
 
-    handle /api/* {
-        reverse_proxy api:8000
-    }
-
-    handle {
-        reverse_proxy frontend:80
-    }
+# Cabeceras de seguridad (RF-04.5 / T-05 / CA-13, Requirement 5).
+# El prefijo ">" reemplaza la cabecera y difiere la operación hasta que la
+# respuesta se escribe, de modo que si el upstream (api o nginx) ya la envía,
+# queda una sola instancia con este valor. "-Server" (también diferida) elimina
+# la cabecera Server de Caddy y la del upstream.
+(security_headers) {
+	header {
+		>Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		>X-Content-Type-Options "nosniff"
+		>X-Frame-Options "DENY"
+		>Referrer-Policy "strict-origin-when-cross-origin"
+		# CSP inicial (R5.3) ampliada solo con las fuentes bloqueadas por el build
+		# de producción (T-06, R5.5): Google Fonts en style-src y font-src.
+		# Detalle y justificación en docs/aws/csp-verificacion.md.
+		>Content-Security-Policy "default-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data:; frame-ancestors 'none'"
+		-Server
+	}
 }
 
+{$APP_DOMAIN::80} {
+	encode gzip
+
+	import security_headers
+
+	handle /api/* {
+		reverse_proxy api:8000
+	}
+
+	handle {
+		reverse_proxy frontend:80
+	}
+
+	# Los errores generados por Caddy (p. ej. 502 si un upstream no responde)
+	# no pasan por la cadena anterior; se aplican aquí las mismas cabeceras
+	# para que toda respuesta, con cualquier código, las incluya (R5.1).
+	handle_errors {
+		import security_headers
+		respond "{err.status_code} {err.status_text}"
+	}
+}
