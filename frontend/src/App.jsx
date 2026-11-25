@@ -25,6 +25,7 @@ import {
   logoutUser,
   setUnauthorizedHandler,
 } from './api/pgguardian'
+import { TIENDADB_SCAN_ENABLED } from './config/features'
 import './App.css'
 
 const POLL_INTERVAL = 30000 // 30 seconds
@@ -38,7 +39,8 @@ function createLocalTab() {
     closable: false,
     scanData: null,
     lastScan: null,
-    isLoading: true,
+    // Sin escaneo de TiendaDB (producción) la pestaña local no espera datos
+    isLoading: TIENDADB_SCAN_ENABLED,
     error: null,
   }
 }
@@ -107,6 +109,7 @@ export default function App() {
   }, [])
 
   const runScan = useCallback(async ({ silent = false } = {}) => {
+    if (!TIENDADB_SCAN_ENABLED) return
     if (!silent) {
       updateLocalTab({ isLoading: true, error: null })
     }
@@ -125,8 +128,9 @@ export default function App() {
   }, [updateLocalTab])
 
   // Escaneo inicial de TiendaDB (Local) únicamente cuando existe sesión autenticada
+  // (solo si VITE_ENABLE_TIENDADB_SCAN es "true"; en producción TiendaDB no existe)
   useEffect(() => {
-    if (!user) return
+    if (!user || !TIENDADB_SCAN_ENABLED) return
     let cancelled = false
     fullScan()
       .then((data) => {
@@ -191,7 +195,7 @@ export default function App() {
 
   // Auto-refresh solo cuando hay sesión activa
   useEffect(() => {
-    if (!user || !autoRefresh) return
+    if (!user || !autoRefresh || !TIENDADB_SCAN_ENABLED) return
     const interval = setInterval(() => runScan({ silent: true }), POLL_INTERVAL)
     return () => clearInterval(interval)
   }, [user, autoRefresh, runScan])
@@ -325,14 +329,16 @@ export default function App() {
                     )}
                   </div>
                   <div className="top-bar-actions">
-                    <label className="auto-refresh-toggle">
-                      <input
-                        type="checkbox"
-                        checked={autoRefresh}
-                        onChange={(e) => setAutoRefresh(e.target.checked)}
-                      />
-                      <span className="toggle-label">Actualización automática (30 s)</span>
-                    </label>
+                    {TIENDADB_SCAN_ENABLED && (
+                      <label className="auto-refresh-toggle">
+                        <input
+                          type="checkbox"
+                          checked={autoRefresh}
+                          onChange={(e) => setAutoRefresh(e.target.checked)}
+                        />
+                        <span className="toggle-label">Actualización automática (30 s)</span>
+                      </label>
+                    )}
                     <button
                       type="button"
                       className="new-analysis-button"
@@ -340,23 +346,25 @@ export default function App() {
                     >
                       Nuevo análisis
                     </button>
-                    <button
-                      className={`scan-button ${localLoading ? 'scan-button--loading' : ''}`}
-                      onClick={() => {
-                        setActiveTabId(LOCAL_TAB_ID)
-                        runScan()
-                      }}
-                      disabled={localLoading}
-                    >
-                      {localLoading ? (
-                        <>
-                          <span className="spinner"></span>
-                          Escaneando…
-                        </>
-                      ) : (
-                        <>Ejecutar Escaneo</>
-                      )}
-                    </button>
+                    {TIENDADB_SCAN_ENABLED && (
+                      <button
+                        className={`scan-button ${localLoading ? 'scan-button--loading' : ''}`}
+                        onClick={() => {
+                          setActiveTabId(LOCAL_TAB_ID)
+                          runScan()
+                        }}
+                        disabled={localLoading}
+                      >
+                        {localLoading ? (
+                          <>
+                            <span className="spinner"></span>
+                            Escaneando…
+                          </>
+                        ) : (
+                          <>Ejecutar Escaneo</>
+                        )}
+                      </button>
+                    )}
                   </div>
                 </header>
 

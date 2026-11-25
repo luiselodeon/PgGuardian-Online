@@ -10,7 +10,7 @@ Lenguajes: Python (FastAPI, unittest), JavaScript (React/Vite), YAML (Compose), 
 
 ## Tasks
 
-- [ ] 1. Fase 1: cambios de código y configuración (T-01 a T-07 y frontend)
+- [x] 1. Fase 1: cambios de código y configuración (T-01 a T-07 y frontend)
   - [x] 1.1 T-01: Hacer obligatorio `JWT_SECRET` en `docker-compose.prod.yml`
     - Cambiar `JWT_SECRET: ${JWT_SECRET}` del servicio `api` por `${JWT_SECRET:?falta JWT_SECRET}`.
     - _RF-04.1 · CA-09 · Requirements: 1.1, 1.2, 1.3_
@@ -63,7 +63,7 @@ Lenguajes: Python (FastAPI, unittest), JavaScript (React/Vite), YAML (Compose), 
     - Casos: `docker compose config` falla sin `JWT_SECRET`; los cinco servicios resuelven `json-file`, `10m`, `3`; `mem_limit` por servicio; `docker compose -f docker-compose.prod.yml config` muestra `create_host_path: false` en el bind mount de `sandbox_db` (tipo `bind`, destino `/var/lib/postgresql/data`, origen resuelto desde `SANDBOX_DATA_DIR` o `./.data/sandbox`) y no existe `sandbox_data`.
     - _RF-04.1 a RF-04.4 · CA-09 a CA-12 · Requirements: 1.2, 2.5, 3.1, 3.2, 3.3, 4.1, 4.8_
 
-  - [ ] 1.10 Frontend sin llamadas a endpoints de TiendaDB (sin T-xx; hallazgo del despliegue)
+  - [x] 1.10 Frontend sin llamadas a endpoints de TiendaDB (sin T-xx; hallazgo del despliegue)
     - Revisar `frontend/src/App.jsx` y `frontend/src/api/pgguardian.js`: buscar en `frontend/src` qué funciones de `/api/full-scan`, `/api/bloat`, `/api/config`, `/api/health`, `/api/indexes` y `/api/queries` se invocan. Hecho conocido: `App.jsx` llama a `fullScan()` en el efecto inicial (línea 131) y en `runScan` (línea 114).
     - Si se ejecutan en producción, condicionarlas a la variable de build de Vite `VITE_ENABLE_TIENDADB_SCAN` (solo con `"true"` se ejecutan `fullScan()` y los detectores). El build de producción no la define. Aplicarlo al efecto inicial, a `runScan` y a cualquier otra llamada encontrada, y ocultar los controles de escaneo de la pestaña local cuando la variable no esté activa.
     - No borrar las funciones de `pgguardian.js` (el entorno de desarrollo con TiendaDB las usa). `/api/health-check` (`healthCheck`) queda fuera de esta tarea.

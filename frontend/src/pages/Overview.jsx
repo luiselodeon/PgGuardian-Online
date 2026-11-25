@@ -1,6 +1,7 @@
 import { useNavigate } from 'react-router-dom'
 import HealthScore from '../components/HealthScore'
 import CategoryCard from '../components/CategoryCard'
+import { TIENDADB_SCAN_ENABLED } from '../config/features'
 import './Overview.css'
 
 export default function Overview({ scanData, isLoading, lastScan, activeTab }) {
@@ -94,7 +95,11 @@ export default function Overview({ scanData, isLoading, lastScan, activeTab }) {
             ))
           ) : (
             <div className="no-data-message">
-              <p>Haz clic en <strong>"Ejecutar Escaneo"</strong> para analizar la base de datos</p>
+              {TIENDADB_SCAN_ENABLED ? (
+                <p>Haz clic en <strong>"Ejecutar Escaneo"</strong> para analizar la base de datos</p>
+              ) : (
+                <p>Haz clic en <strong>"Nuevo análisis"</strong> para analizar tus scripts SQL en el sandbox</p>
+              )}
             </div>
           )}
         </div>
