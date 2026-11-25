@@ -39,3 +39,21 @@ Las páginas `BloatPage`, `ConfigPage`, `HealthPage`, `IndexesPage` y `QueriesPa
 - `frontend/.env.development`: define `VITE_ENABLE_TIENDADB_SCAN=true`. Vite solo carga este archivo en modo desarrollo (`npm run dev`, contenedor `frontend` de `docker-compose.yml`), así que el entorno con TiendaDB conserva el escaneo y `vite build` no lo lee.
 
 **Comprobación del build.** Tras `npm run build` (modo producción), el bundle `dist/assets/index-*.js` contiene 0 apariciones de `/full-scan`, `/bloat/`, `/config/`, `/health/`, `/indexes/`, `/queries/` y del texto «Ejecutar Escaneo»: Vite elimina ese código como inalcanzable. Un build con `--mode development` sí contiene `/full-scan`. La verificación en navegador de R26.3 (pestaña Red con 0 solicitudes a esos prefijos al recorrer login, registro y análisis) queda para el despliegue.
+
+**Nota: pestaña local y etiqueta TiendaDB ocultas en producción (tarea 1.11, R26.4 a R26.7).**
+
+- `frontend/src/components/AnalysisTabs.jsx`: con `TIENDADB_SCAN_ENABLED` falso, filtra en el render las pestañas con `kind === 'local'` (`visibleTabs`) y devuelve `null` si no queda ninguna, de modo que la barra se oculta sin análisis y solo muestra las pestañas de sandbox al crear uno.
+- `frontend/src/pages/Overview.jsx`: `tabTitle` por defecto pasa a `'Análisis'`. Sin sandbox activo y con la bandera falsa, la píldora muestra «Sin análisis seleccionado» y el subtítulo «Selecciona o crea un análisis para ver el resumen». Con la bandera verdadera se conservan «TiendaDB (Local · init/)» y «Resumen de salud de la base de datos local».
+- `frontend/src/App.jsx` no se modificó: la pestaña local sigue en `tabs`, `LOCAL_TAB_ID` sigue siendo el valor inicial de `activeTabId` y `tabs[0]` sigue siendo el respaldo de `activeTab`, así que `activeTab` nunca queda `undefined` (R26.5).
+
+Resultado de la verificación (2026-11-24):
+
+| Comprobación | Método | Resultado |
+| --- | --- | --- |
+| Build de producción compila | `npm run build` en `frontend/` | Aprobado (código 0) |
+| Filtro de la pestaña local presente | Bundle `dist/assets/index-*.js`: `e.filter(e=>e.kind!==\`local\`)` seguido de `i.length===0?null` | Aprobado |
+| Sin «TiendaDB» renderizable en el Overview | Bundle de producción: «TiendaDB (Local · init/)» 0 veces, «base de datos local» 0 veces; la única aparición de «TiendaDB» es el `label` de la pestaña local en el estado, que no se renderiza (barra filtrada y el Overview solo usa `tabTitle` en la píldora de sandbox) | Aprobado |
+| Etiqueta neutral | Bundle de producción: «Sin análisis seleccionado» y «Selecciona o crea un análisis…» presentes | Aprobado |
+| Desarrollo sin cambios (R26.7) | `vite build --mode development` (lee `.env.development` con `VITE_ENABLE_TIENDADB_SCAN=true`): «TiendaDB (Local · init/)» y «Resumen de salud de la base de datos local» presentes, «Sin análisis seleccionado» ausente | Aprobado |
+| Lint | `npx eslint` sobre los dos archivos | Aprobado |
+| Recorrido en navegador (0 pestañas «TiendaDB (Local)», solo la del sandbox al crear uno, consola sin errores por `activeTab`) | Playwright con Chromium headless (2026-11-24), build de producción servido con ite preview contra el backend real (docker compose up: db, app_db, sandbox_db, api) | Aprobado: 0 pestañas «TiendaDB (Local)» y sin barra de pestañas sin análisis; el Overview muestra «Sin análisis seleccionado» y no contiene «TiendaDB» ni «base de datos local»; las páginas bloat, config, health, indexes, queries e history cargan sin texto «TiendaDB»; al crear un sandbox solo aparece su pestaña (también tras recargar) y al cerrarla la barra desaparece; sin errores de consola por ctiveTab (el único error es el 401 esperado de GET /api/auth/me antes de iniciar sesión). En modo desarrollo (VITE_ENABLE_TIENDADB_SCAN=true) siguen la pestaña «TiendaDB (Local)», la píldora «TiendaDB (Local · init/)» y «Resumen de salud de la base de datos local», con los mismos 401 esperados y sin otros errores |

@@ -70,6 +70,14 @@ Lenguajes: Python (FastAPI, unittest), JavaScript (React/Vite), YAML (Compose), 
     - Crear `docs/aws/decision-log.md` con la entrada R24.7: `requisito_afectado` «hallazgo del despliegue, sin RF ni CA en la fuente», el resultado de la revisión (llamadas encontradas) y el cambio aplicado. T-26 (tarea 9.4) completa el resto del registro.
     - _Hallazgo del despliegue · Requirements: 26.1, 26.2, 26.3, 24.7_
 
+  - [x] 1.11 Ocultar la pestaña local y la etiqueta TiendaDB en producción (sin T-xx; hallazgo del despliegue)
+    - En `frontend/src/components/AnalysisTabs.jsx`: importar `TIENDADB_SCAN_ENABLED` de `frontend/src/config/features.js` y filtrar en el render (no en el estado) las pestañas con `kind === 'local'` cuando la bandera sea falsa (`visibleTabs`). Si no queda ninguna pestaña visible, devolver `null` para ocultar la barra completa. Usar `visibleTabs.map(...)` en lugar de `tabs.map(...)`.
+    - En `frontend/src/pages/Overview.jsx`: cuando no hay sandbox activo y `TIENDADB_SCAN_ENABLED` es falso, mostrar la píldora «Sin análisis seleccionado» y un subtítulo neutral («Selecciona o crea un análisis para ver el resumen»). El `tabTitle` por defecto no debe contener «TiendaDB» (p. ej. `activeTab?.label || 'Análisis'`). Con la bandera verdadera, conservar «TiendaDB (Local · init/)», «Resumen de salud de la base de datos local» y el resto de etiquetas actuales, sin cambios.
+    - NO tocar `frontend/src/App.jsx` ni quitar la pestaña local del estado: `tabs[0]` es la pestaña de respaldo de `activeTab` y `LOCAL_TAB_ID` es el valor inicial de `activeTabId`. Quitarla dejaría `activeTab` como `undefined` y rompería el Overview y las páginas por categoría (también `closeTab`, `updateLocalTab`, `resetSessionState` y el efecto de restauración del último análisis).
+    - Verificar en un build de producción (sin `VITE_ENABLE_TIENDADB_SCAN`): 0 pestañas «TiendaDB (Local)», barra oculta sin análisis, solo la pestaña del sandbox al crear uno, Overview sin el texto «TiendaDB» ni «base de datos local» y sin errores en consola por `activeTab` indefinido. En desarrollo (`VITE_ENABLE_TIENDADB_SCAN=true`) todo queda igual que antes.
+    - Añadir el resultado de la verificación como nota a la entrada R24.7 de `docs/aws/decision-log.md` (creada en la tarea 1.10).
+    - _Hallazgo del despliegue · Requirements: 26.4, 26.5, 26.6, 26.7, 24.7_
+
 - [x] 2. Verificación local previa al despliegue (T-08)
   - [x] 2.1 T-08: Script de verificación local de la Fase 1
     - Crear `scripts/verify_phase1.sh` y `scripts/verify_phase1.ps1`.
@@ -217,7 +225,7 @@ Lenguajes: Python (FastAPI, unittest), JavaScript (React/Vite), YAML (Compose), 
 - Las tareas marcadas con `*` son opcionales y se pueden omitir para un MVP más rápido.
 - El diseño no incluye una sección de Correctness Properties, por lo que no hay tareas de pruebas basadas en propiedades; solo pruebas unitarias y de configuración.
 - Las ejecuciones en la cuenta AWS, el MFA físico, las capturas de pantalla, el borrado del secreto huérfano (7.6) y las aprobaciones del Equipo se realizan manualmente con los artefactos que producen estas tareas.
-- `docs/aws/runbook.md` lo crea la tarea 4.1 y lo amplían 4.2, 4.3, 5.1 a 5.4, 6.1, 6.3 y 7.1 a 7.6, cada una en una ola distinta. `docker-compose.prod.yml` (1.1 a 1.4), `Caddyfile` (1.5, 1.6), `.env.prod.example` (1.4, 6.2) y `docs/aws/decision-log.md` (1.10, 9.4) también se modifican en olas distintas.
+- `docs/aws/runbook.md` lo crea la tarea 4.1 y lo amplían 4.2, 4.3, 5.1 a 5.4, 6.1, 6.3 y 7.1 a 7.6, cada una en una ola distinta. `docker-compose.prod.yml` (1.1 a 1.4), `Caddyfile` (1.5, 1.6), `.env.prod.example` (1.4, 6.2) y `docs/aws/decision-log.md` (1.10, 1.11, 9.4) también se modifican en olas distintas.
 - Fuera de alcance (sección «Mejoras futuras» de `requirements.md`): grupo de operadores, `pg_dump` periódico, prueba de restauración, unidad systemd de respaldo, prueba con usuario sin MFA y política DLM.
 
 ### Cobertura de requisitos
@@ -249,7 +257,7 @@ Lenguajes: Python (FastAPI, unittest), JavaScript (React/Vite), YAML (Compose), 
 | R23 | 7.4, 7.5 |
 | R24 | 1.10, 9.4 |
 | R25 | 9.1, 9.2, 9.3 |
-| R26 | 1.10 |
+| R26 | 1.10, 1.11 |
 | R27 | 7.6 |
 | R28 | 9.5 |
 
@@ -259,7 +267,7 @@ Lenguajes: Python (FastAPI, unittest), JavaScript (React/Vite), YAML (Compose), 
 {
   "waves": [
     { "id": 0, "tasks": ["1.1", "1.5", "1.7", "1.10", "4.1", "9.5"] },
-    { "id": 1, "tasks": ["1.2", "1.6", "1.8", "4.2", "9.1", "9.2", "9.3"] },
+    { "id": 1, "tasks": ["1.2", "1.6", "1.8", "1.11", "4.2", "9.1", "9.2", "9.3"] },
     { "id": 2, "tasks": ["1.3", "4.3", "9.4"] },
     { "id": 3, "tasks": ["1.4", "5.1"] },
     { "id": 4, "tasks": ["1.9", "2.1", "5.2", "6.2"] },

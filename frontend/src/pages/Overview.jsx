@@ -16,7 +16,15 @@ export default function Overview({ scanData, isLoading, lastScan, activeTab }) {
   }
 
   const isSandbox = Boolean(scanData?.is_sandbox || activeTab?.kind === 'sandbox')
-  const tabTitle = activeTab?.label || 'TiendaDB (Local)'
+  const tabTitle = activeTab?.label || 'Análisis'
+  const sourcePill = isSandbox
+    ? `Sandbox: ${tabTitle}`
+    : TIENDADB_SCAN_ENABLED ? 'TiendaDB (Local · init/)' : 'Sin análisis seleccionado'
+  const subtitle = isSandbox
+    ? 'Resumen de análisis ejecutado desde scripts SQL aislados'
+    : TIENDADB_SCAN_ENABLED
+      ? 'Resumen de salud de la base de datos local'
+      : 'Selecciona o crea un análisis para ver el resumen'
   const activeDetectors = scanData?.evaluated_detectors ?? (scanData?.categories ? 22 : '—')
   const naDetectors = scanData?.not_applicable_detectors ?? 0
 
@@ -27,14 +35,10 @@ export default function Overview({ scanData, isLoading, lastScan, activeTab }) {
           <div className="overview-title-row">
             <h1 className="page-title">Panel General</h1>
             <span className={`overview-source-pill ${isSandbox ? 'source--sandbox' : 'source--local'}`}>
-              {isSandbox ? `Sandbox: ${tabTitle}` : 'TiendaDB (Local · init/)'}
+              {sourcePill}
             </span>
           </div>
-          <p className="page-subtitle">
-            {isSandbox
-              ? 'Resumen de análisis ejecutado desde scripts SQL aislados'
-              : 'Resumen de salud de la base de datos local'}
-          </p>
+          <p className="page-subtitle">{subtitle}</p>
         </div>
         {lastScan && (
           <div className="last-scan-info">

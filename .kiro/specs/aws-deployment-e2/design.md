@@ -407,19 +407,61 @@ Si el Volumen_Sandbox falta en un arranque, `nofail` permite que el SO termine d
 - **Secreto huérfano (R27):** tarea manual descrita en la sección «Costos» de `docs/aws/runbook.md`. El Equipo lista los secretos con `aws secretsmanager list-secrets --region us-east-2`, identifica el Secreto_Huerfano y confirma que no se usa (fecha de último acceso y búsqueda del nombre o ARN en el código, en `docker-compose.prod.yml` y en el `.env` de la Instancia). Solo entonces ejecuta `aws secretsmanager delete-secret --secret-id <arn> --recovery-window-in-days <7..30>`, nunca con `--force-delete-without-recovery`. Si no puede confirmarlo, conserva el secreto y registra el motivo (R27.4).
 - **Documento fuente (R28):** el Equipo redacta en `PgGuardian - Requisitos del Entregable 2 (AWS).md` tres secciones: alcance del E2, plan de trabajo y proceso estándar.
 
-### C13. Frontend sin llamadas a endpoints de TiendaDB (R26)
+### C13. Frontend sin llamadas ni pestaña de TiendaDB (R26)
 
 **Trazabilidad:** hallazgo del despliegue, sin RF ni CA en la fuente · tarea nueva de la Fase 1 (sin T-xx) · registro en R24.7
 
-Situación actual: `frontend/src/App.jsx` llama a `fullScan()` al iniciar sesión (efecto inicial, línea 131) y en `runScan` (línea 114). `frontend/src/api/pgguardian.js` define `fullScan` (`/full-scan`) y funciones para los routers `/bloat`, `/config`, `/health`, `/indexes` y `/queries`. En el backend esos endpoints usan `get_connection()`, que conecta a TiendaDB, y en producción TiendaDB no existe, así que fallarían al iniciar sesión.
+Situación actual: `frontend/src/App.jsx` llama a `fullScan()` al iniciar sesión (líneas 114 y 131) y `frontend/src/api/pgguardian.js` define funciones para `/full-scan` y los routers `/bloat`, `/config`, `/health`, `/indexes` y `/queries`. En el backend esos endpoints usan `get_connection()`, que conecta a TiendaDB, inexistente en producción. `frontend/src/config/features.js` exporta `TIENDADB_SCAN_ENABLED`, que es `true` solo si `VITE_ENABLE_TIENDADB_SCAN === 'true'`; el build de producción no define la variable.
 
-Diseño:
+Además, `App.jsx` crea siempre la Pestaña_Local con `createLocalTab()` (`LOCAL_TAB_ID = 'tiendadb-local'`, label «TiendaDB (Local)», `kind: 'local'`). `tabs` inicia con ella, `activeTabId` inicia en `LOCAL_TAB_ID`, `activeTab = tabs.find(...) || tabs[0]`, y `closeTab`, `updateLocalTab`, `resetSessionState` y el efecto que restaura el último análisis (`setActiveTabId(curr => curr === LOCAL_TAB_ID ? detail.id : curr)`) dependen de ella. `AnalysisTabs` pinta `tabs.map(...)` con la insignia «Local», y `Overview` muestra «TiendaDB (Local · init/)» y «base de datos local» cuando no hay sandbox activo.
 
-1. **Revisión (R26.1):** listar qué funciones de `pgguardian.js` de esos seis prefijos se invocan desde componentes (búsqueda de sus nombres en `frontend/src`) y anotar el resultado en la entrada R24.7 del Registro_Decisiones.
-2. **Retiro en producción (R26.2):** las llamadas que se ejecuten se condicionan a una variable de build de Vite, `VITE_ENABLE_TIENDADB_SCAN`. Solo con el valor `"true"` se ejecutan `fullScan()` y los detectores; el build de producción no la define, así que el código no hace esas solicitudes. Esto aplica al efecto inicial y a `runScan` de `App.jsx`, y a cualquier otra llamada que aparezca en la revisión. Los controles de escaneo de la pestaña local se ocultan cuando la variable no está activa, para no mostrar un botón que no hace nada.
-3. **Fuera de alcance:** `/api/health-check` (`healthCheck` en `pgguardian.js`) se mantiene, porque usa App_DB en producción (C3). Las funciones de `pgguardian.js` no se borran, para no romper el entorno de desarrollo con TiendaDB.
-4. **Verificación (R26.3):** con el build de producción, iniciar sesión y recorrer login, registro y análisis con la pestaña Red abierta: 0 solicitudes a `/api/full-scan`, `/api/bloat`, `/api/config`, `/api/health/`, `/api/indexes` y `/api/queries`.
+**Diseño:**
 
+1. **Revisión (R26.1):** buscar en `frontend/src` las invocaciones de las funciones de `pgguardian.js` de los seis prefijos y anotar el resultado en la entrada R24.7 del Registro_Decisiones. Las llamadas deben quedar condicionadas a `TIENDADB_SCAN_ENABLED`; si la revisión encuentra una que no lo esté, se condiciona y se registra (R26.2). Las funciones de `pgguardian.js` no se borran, para no romper el desarrollo con TiendaDB. `/api/health-check` queda fuera (C3).
+2. **Pestaña oculta en el render, no quitada del estado (R26.4, R26.5):** el cambio se hace solo en `AnalysisTabs.jsx` y `Overview.jsx`, sin tocar `App.jsx`.
+3. **Etiqueta neutral en el Overview (R26.6, R26.7).**
+
+```jsx
+// frontend/src/components/AnalysisTabs.jsx (a)
+import { TIENDADB_SCAN_ENABLED } from '../config/features'
+
+export default function AnalysisTabs({ tabs, activeTabId, onSelectTab, onCloseTab }) {
+  const visibleTabs = TIENDADB_SCAN_ENABLED ? tabs : tabs.filter((t) => t.kind !== 'local')
+  if (visibleTabs.length === 0) return null   // oculta la barra completa
+  // ... el resto igual, con visibleTabs.map(...) en lugar de tabs.map(...)
+}
+```
+
+```jsx
+// frontend/src/pages/Overview.jsx (b)
+const tabTitle = activeTab?.label || 'Análisis'          // sin "TiendaDB"
+const sourcePill = isSandbox
+  ? `Sandbox: ${tabTitle}`
+  : TIENDADB_SCAN_ENABLED ? 'TiendaDB (Local · init/)' : 'Sin análisis seleccionado'
+const subtitle = isSandbox
+  ? 'Resumen de análisis ejecutado desde scripts SQL aislados'
+  : TIENDADB_SCAN_ENABLED
+    ? 'Resumen de salud de la base de datos local'
+    : 'Selecciona o crea un análisis para ver el resumen'
+```
+
+`activeTabId` y `onSelectTab` no cambian. Si la pestaña local oculta es la activa, `activeTab` sigue siendo ella, y el Overview, al no ser sandbox, muestra la etiqueta neutral y el mensaje de «Nuevo análisis» que ya existe.
+
+| Situación | `TIENDADB_SCAN_ENABLED` | Barra de pestañas | Píldora y subtítulo del Overview |
+| --- | --- | --- | --- |
+| Producción, sin análisis | `false` | Oculta (`visibleTabs` vacío) | «Sin análisis seleccionado» y subtítulo neutral; sin «TiendaDB» |
+| Producción, con análisis sandbox activo | `false` | Solo la pestaña del sandbox | «Sandbox: <nombre>» y subtítulo del sandbox |
+| Desarrollo | `true` | Pestaña local y sandboxes, como hoy | Sin cambios |
+
+**Riesgo evitado:** quitar la Pestaña_Local de `tabs` dejaría `tabs[0]` indefinido y, por tanto, `activeTab` como `undefined` mientras `activeTabId` siga en `LOCAL_TAB_ID`. Eso rompería el Overview y las páginas por categoría, además de `closeTab`, `updateLocalTab`, `resetSessionState` y el efecto de restauración. Ocultarla solo en el render mantiene intacto ese estado.
+
+**Verificación (R26.3 a R26.7):** con el build de producción, iniciar sesión y recorrer login, registro y análisis con la pestaña Red abierta.
+- 0 solicitudes a `/api/full-scan`, `/api/bloat`, `/api/config`, `/api/health/`, `/api/indexes` y `/api/queries` (R26.3).
+- 0 pestañas «TiendaDB (Local)» y barra oculta sin análisis (R26.4).
+- Overview con «Sin análisis seleccionado» y sin el texto «TiendaDB» ni «base de datos local» (R26.6).
+- Al crear un análisis sandbox, la barra muestra solo su pestaña (R26.4).
+- Sin errores en consola por `activeTab` indefinido (R26.5).
+- Con `VITE_ENABLE_TIENDADB_SCAN=true`, pestaña y etiquetas actuales (R26.7).
 ### C14. Scripts y runbook (transversal, R8 a R23)
 
 Solo son obligatorios los scripts que crean o modifican recursos. Las verificaciones son comandos dentro de un único documento.
@@ -523,7 +565,8 @@ Se aplican a instancia, disco raíz, Volumen_Sandbox, Elastic IP y snapshots man
 | ZAP con hallazgos medios/altos | Se corrigen y repiten, o se justifican por escrito. | R25.2 |
 | `nmap` muestra puertos extra | Se cierran o se justifican por escrito. | R25.4 |
 | Entrada del registro sin campo o aprobación | Decisión no aprobada; T-26 no se cierra. | R24.9 |
-| Frontend de producción llama a un endpoint de TiendaDB | Se retira la llamada (variable de build) y se registra en R24.7. | R26.2 |
+| Frontend de producción llama a un endpoint de TiendaDB | Se condiciona la llamada a `TIENDADB_SCAN_ENABLED` y se registra en R24.7. | R26.2 |
+| Pestaña local presente en el estado sin TiendaDB (producción) | Se oculta solo en el render de `AnalysisTabs`; `activeTab` nunca queda `undefined`. | R26.4, R26.5 |
 | No se puede confirmar que el secreto no se usa | Se conserva el secreto y se registra el motivo. | R27.4 |
 
 ## Testing Strategy
@@ -562,6 +605,7 @@ Las verificaciones automatizables de `docker-compose.prod.yml` (T-1.9) también 
 | CSP | Recorrido manual de login, registro y análisis con consola abierta | R5.4 · CA-13 |
 | Verificación local completa | `scripts/verify_phase1` (precondición `.env`/`JWT_SECRET`, `docker compose -f docker-compose.prod.yml up -d --build`, CA-09 a CA-14) | R7 |
 | Frontend sin TiendaDB | Build de producción; login, registro y análisis con la pestaña Red abierta: 0 solicitudes a los seis prefijos | R26.3 |
+| Pestaña y etiquetas locales ocultas | Producción: 0 pestañas «TiendaDB (Local)», barra oculta sin análisis, Overview con «Sin análisis seleccionado» y sin «TiendaDB»; con sandbox, solo su pestaña; con la variable en `true`, sin cambios | R26.4 a R26.7 |
 
 ### Pruebas de integración en AWS (ejemplos, 1 a 3 casos)
 

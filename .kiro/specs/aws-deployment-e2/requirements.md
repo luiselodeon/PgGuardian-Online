@@ -37,6 +37,8 @@ Prioridades MoSCoW de la fuente: Debe, Debería, Podría. Cada requisito declara
 - **Registro_Decisiones**: Registro de desviaciones respecto del Entregable 1 y de la fuente, con justificación y aprobación del equipo.
 - **SANDBOX_DATA_DIR**: Variable de entorno que define el directorio del host montado como datos de Sandbox_DB; valor por defecto `./.data/sandbox`, y `/srv/sandbox/pgdata` en la Instancia.
 - **Script_Verificacion_Local**: Script que ejecuta la verificación local de T-08 (precondiciones, arranque de `docker-compose.prod.yml` y criterios CA-09 a CA-14).
+- **TIENDADB_SCAN_ENABLED**: Constante del Frontend derivada de `VITE_ENABLE_TIENDADB_SCAN`; es falsa en el build de producción (variable no definida) y verdadera en desarrollo.
+- **Pestaña_Local**: Pestaña `TiendaDB (Local)` (`LOCAL_TAB_ID = 'tiendadb-local'`, `kind: 'local'`) creada por `createLocalTab()` en `frontend/src/App.jsx`.
 - **Equipo**: Los integrantes del proyecto PgGuardian.
 
 ## Requirements
@@ -406,15 +408,21 @@ Prioridades MoSCoW de la fuente: Debe, Debería, Podría. Cada requisito declara
 
 **User Story:** Como integrante del equipo, quiero que el Frontend de producción no llame a endpoints que dependen de TiendaDB, para que la aplicación no falle al iniciar sesión en AWS.
 
-**Trazabilidad:** Hallazgo del despliegue, sin RF ni CA en la fuente · Tareas: nueva tarea de la Fase 1 (sin T-xx en la fuente) · Registro: Requirement 24, criterio 7
+**Trazabilidad:** Hallazgo del despliegue, sin RF ni CA en la fuente · Tareas: nueva tarea de la Fase 1 (sin T-xx en la fuente) · Archivos: `frontend/src/App.jsx`, `frontend/src/components/AnalysisTabs.jsx`, `frontend/src/pages/Overview.jsx` y `frontend/src/api/pgguardian.js` · Registro: Requirement 24, criterio 7
 
 Contexto verificado: `frontend/src/App.jsx` llama a `fullScan()` al iniciar sesión (líneas 114 y 131), y `frontend/src/api/pgguardian.js` define funciones para `/full-scan` y para los routers `/bloat`, `/config`, `/health`, `/indexes` y `/queries`. En el backend estos endpoints (`/api/full-scan`, `/api/bloat/*`, `/api/config/*`, `/api/health/*`, `/api/indexes/*` y `/api/queries/*`) usan `get_connection()`, que conecta a TiendaDB. El endpoint `/api/health-check` del Requirement 6 queda fuera de este requisito.
+
+Contexto verificado de la pestaña local (con `VITE_ENABLE_TIENDADB_SCAN` no definida, es decir, en producción): `frontend/src/App.jsx` crea siempre la Pestaña_Local mediante `createLocalTab()` (id `LOCAL_TAB_ID = 'tiendadb-local'`, label «TiendaDB (Local)», `kind: 'local'`) y la deja en el estado `tabs`. `tabs[0]` es la pestaña de respaldo de `activeTab`, y `LOCAL_TAB_ID` es el valor inicial de `activeTabId` y se usa también en `closeTab`, `updateLocalTab` y `resetSessionState`. `frontend/src/components/AnalysisTabs.jsx` pinta todas las pestañas de `tabs`, por lo que en producción la Pestaña_Local aparece en la barra sin contenido. `frontend/src/pages/Overview.jsx` muestra en la píldora «TiendaDB (Local · init/)» cuando no hay un sandbox activo, usa «TiendaDB (Local)» como `tabTitle` por defecto y muestra el subtítulo «Resumen de salud de la base de datos local». Decisión: no borrar la Pestaña_Local del estado, porque `activeTab` podría quedar `undefined` y romper el Overview y las páginas por categoría; ocultarla solo en el render de `AnalysisTabs` y usar una etiqueta neutral en el Overview. El mensaje de «Nuevo análisis» del estado vacío ya existe y no se modifica.
 
 #### Acceptance Criteria
 
 1. WHEN el Equipo prepara el build de producción del Frontend, THE Equipo SHALL revisar `frontend/src/App.jsx` y `frontend/src/api/pgguardian.js` y registrar qué llamadas a `/api/full-scan`, `/api/bloat`, `/api/config`, `/api/health`, `/api/indexes` y `/api/queries` se ejecutan en producción.
 2. IF el Frontend de producción llama a alguno de los endpoints del criterio 1, THEN THE Equipo SHALL quitar esas llamadas del Frontend de producción y registrar el cambio en el Registro_Decisiones como hallazgo del despliegue (Requirement 24, criterio 7).
 3. WHEN un usuario inicia sesión en el Frontend de producción y recorre las pantallas de login, registro y análisis, THE Frontend SHALL enviar 0 solicitudes a los endpoints del criterio 1, verificable en la pestaña Red de las herramientas de desarrollo del navegador.
+4. WHEN `TIENDADB_SCAN_ENABLED` es falso (build de producción), THE Frontend SHALL no mostrar la Pestaña_Local `TiendaDB (Local)` en la barra de pestañas (`AnalysisTabs`), y SHALL ocultar la barra por completo si no queda ninguna pestaña visible.
+5. THE Frontend SHALL conservar la Pestaña_Local en el estado de `App.jsx` (`tabs`, `LOCAL_TAB_ID` como valor inicial de `activeTabId` y `tabs[0]` como pestaña de respaldo de `activeTab`) aunque no se muestre, de modo que `activeTab` nunca sea `undefined` y el Overview y las páginas por categoría no fallen.
+6. WHEN `TIENDADB_SCAN_ENABLED` es falso y no hay un análisis sandbox activo, THE Frontend SHALL mostrar en el Overview la etiqueta «Sin análisis seleccionado» en lugar de «TiendaDB (Local · init/)», y SHALL NOT mostrar el texto «TiendaDB» ni «base de datos local» en el encabezado del Overview (incluido el subtítulo y el título por defecto).
+7. WHEN `TIENDADB_SCAN_ENABLED` es verdadero (entorno de desarrollo), THE Frontend SHALL mantener la Pestaña_Local visible y las etiquetas actuales, sin cambio de comportamiento.
 
 ### Requirement 27: Secreto huérfano en Secrets Manager
 
