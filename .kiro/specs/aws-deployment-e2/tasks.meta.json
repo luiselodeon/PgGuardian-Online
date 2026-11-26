@@ -223,6 +223,37 @@
         "chatSessionId": "sess_03f1fa5d-de6f-421c-af51-a33032f5effa",
         "timestamp": 1795659401653
       }
+    ],
+    "5.3 Runbook: verificaciones de instancia, volúmenes, Security Group, IMDS, etiquetas y Elastic IP": [
+      {
+        "executionId": "ac1ac81e-89ac-4c3e-97dd-48b7791306ca",
+        "chatSessionId": "sess_c30ccaa2-22cb-4316-b92f-74eaa17d5e8d",
+        "timestamp": 1795668297545
+      },
+      {
+        "executionId": "ac1ac81e-89ac-4c3e-97dd-48b7791306ca",
+        "chatSessionId": "sess_c30ccaa2-22cb-4316-b92f-74eaa17d5e8d",
+        "timestamp": 1795668725957
+      }
+    ],
+    "5.4 Runbook: borrado del stack": [
+      {
+        "executionId": "f6b58d67-1bd3-419e-9fbb-2faf7ff07cd6",
+        "chatSessionId": "sess_ea901540-269b-497c-bff9-2b27f4e206ca",
+        "timestamp": 1795668754235
+      },
+      {
+        "executionId": "f6b58d67-1bd3-419e-9fbb-2faf7ff07cd6",
+        "chatSessionId": "sess_ea901540-269b-497c-bff9-2b27f4e206ca",
+        "timestamp": 1795668875144
+      }
+    ],
+    "5. Fase 3: stack de CloudFormation `pgguardian` (recursos de T-11 a T-15 y T-19 a T-21)": [
+      {
+        "executionId": "f6b58d67-1bd3-419e-9fbb-2faf7ff07cd6",
+        "chatSessionId": "sess_ea901540-269b-497c-bff9-2b27f4e206ca",
+        "timestamp": 1795668875229
+      }
     ]
   }
 }

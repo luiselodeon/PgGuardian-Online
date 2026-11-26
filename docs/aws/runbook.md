@@ -479,9 +479,9 @@ CA-16 queda aprobado solo si 1.2.4 y 1.2.5 (para todos los usuarios) están en `
 
 ## 2. Stack
 
-Trazabilidad: componente C15 del diseño · R29.2, R29.3, R29.6, R29.7, R29.8, R29.10 y R21.1 · Recursos de T-11 a T-15 y T-19 a T-21.
+Trazabilidad: componente C15 del diseño · R29.2, R29.3, R29.6, R29.7, R29.8, R29.9, R29.10, R21.1 y R23.3 · Recursos de T-11 a T-15 y T-19 a T-21.
 
-Esta sección crea y actualiza el stack `pgguardian` a partir de `infra/cloudformation/pgguardian.yaml`. Todo se ejecuta en CloudShell (`us-east-2`) con un Usuario_IAM de `PgG-Admins` autenticado con MFA. A diferencia de las demás secciones, varios pasos **modifican la cuenta**, y cada uno lo indica: 2.1.3 borra el monitor de anomalías por defecto, 2.1.6 crea el stack, 2.1.7 activa su protección, 2.3 lo actualiza y 2.4 lo borra tras un despliegue fallido.
+Esta sección crea y actualiza el stack `pgguardian` a partir de `infra/cloudformation/pgguardian.yaml`. Todo se ejecuta en CloudShell (`us-east-2`) con un Usuario_IAM de `PgG-Admins` autenticado con MFA. A diferencia de las demás secciones, varios pasos **modifican la cuenta**, y cada uno lo indica: 2.1.3 borra el monitor de anomalías por defecto, 2.1.6 crea el stack, 2.1.7 activa su protección, 2.3 lo actualiza, 2.4 lo borra tras un despliegue fallido y 2.5 lo borra cuando se retira el despliegue.
 
 Condiciones que deben cumplirse:
 
@@ -494,6 +494,7 @@ Condiciones que deben cumplirse:
 | El stack queda en `CREATE_COMPLETE` con `EnableTerminationProtection=true` | R29.8 | 2.1.7 |
 | El stack publica los outputs `InstanceId`, `PublicIp`, `AppDomain` y `SandboxVolumeId` | R29.3 | 2.2 |
 | Si fallan los recursos de Cost Anomaly Detection, se aplica el plan B | R29.10 | 2.4 |
+| El borrado sigue el orden: protección del stack, `DisableApiTermination`, snapshots de ambos discos en `completed` y `delete-stack` | R29.9, R23.3 | 2.5 |
 
 R29 no tiene un criterio CA propio. En las líneas «Resultado de verificación» de esta sección, `criterio` lleva `sin CA` y el número exacto va en `requisito`. Los recursos del stack se verifican después con los criterios de sus Requirements, en las secciones 3, 7 y 8.
 
@@ -1034,13 +1035,248 @@ Resultado de verificación del plan B, anotado a mano:
 
 La sección 2 queda completa para el primer despliegue cuando 2.1.1, 2.1.3, 2.1.5, 2.1.7 y 2.2 están en `aprobado` (y, si se aplicó, también el plan B). Cada actualización posterior añade las líneas de 2.1.1, del punto 4 de 2.3, de 2.1.7 y de 2.2.
 
-### 2.5 Borrado del stack
+### 2.5 Borrado del stack (R29.8, R29.9, R23.3, modifica y borra recursos)
 
-Pendiente: tarea 5.4 (borrado del stack con snapshots previos).
+> **Atención.** Este procedimiento borra la Instancia, los dos discos (con los datos de `app_db` y del sandbox) y la Elastic IP. La URL `<ip-con-guiones>.sslip.io` deja de existir y no se puede recuperar la misma IP. Solo se ejecuta cuando el Equipo decide retirar el despliegue, y se avisa antes a todos los integrantes. Para una pausa basta con detener la Instancia (sección 6).
+
+El orden es fijo (R29.9) y no se salta ningún paso: 2.5.1 → 2.5.2 → 2.5.3 → 2.5.4 → 2.5.5 → 2.5.6. Si un paso no queda en `aprobado`, no se sigue con el siguiente. Todo se ejecuta en CloudShell (`us-east-2`) con un Usuario_IAM de `PgG-Admins` autenticado con MFA, desde la raíz del repositorio clonado (2.0).
+
+Este borrado es el de un stack en uso. El borrado de un stack fallido en el primer despliegue, sin snapshots, está en el punto 3 de 2.4.
+
+Qué borra `delete-stack` y qué conserva:
+
+| Se borra con el stack | Se conserva |
+| --- | --- |
+| `Instance` (la Instancia) | Snapshots manuales de los dos discos (no pertenecen al stack) |
+| Disco raíz (`DeleteOnTermination: true`) | Usuario_IAM, `PgG-Admins` y `Force_MFA` (fuera de la plantilla, R29.5) |
+| `SandboxVolume` y `SandboxVolumeAttachment` | Monitor y suscripción de anomalías creados con `create_anomaly_detection.sh`, solo si se aplicó el plan B (2.4) |
+| `ElasticIp` | Evidencia en `docs/aws/evidencia/` y el repositorio |
+| `Ec2Role` y `Ec2InstanceProfile` | |
+| `AppSecurityGroup` | |
+| `MonthlyBudget` | |
+| `RecoverAlarm` | |
+| `CostAnomalyMonitor` y `CostAnomalySubscription` | |
+
+La plantilla no declara `DeletionPolicy` en ningún recurso, así que CloudFormation borra todos los recursos del stack (11, o 9 con el plan B). Los snapshots siguen cobrando almacenamiento (unos 0.05 USD por GB-mes) hasta que el Equipo los borre a mano.
+
+#### 2.5.1 Preparación: outputs y volúmenes
+
+```bash
+mkdir -p docs/aws/evidencia/stack
+FECHA=$(date -u +%Y%m%dT%H%MZ)
+output_stack() {
+  aws cloudformation describe-stacks --stack-name pgguardian \
+    --query "Stacks[0].Outputs[?OutputKey=='$1'].OutputValue" --output text
+}
+INSTANCE_ID=$(output_stack InstanceId)
+SANDBOX_VOLUME_ID=$(output_stack SandboxVolumeId)
+ROOT_VOLUME_ID=$(aws ec2 describe-instances --instance-ids "$INSTANCE_ID" --output json \
+  | jq -r '.Reservations[0].Instances[0] as $i | $i.BlockDeviceMappings[]
+           | select(.DeviceName == $i.RootDeviceName) | .Ebs.VolumeId')
+echo "instancia=$INSTANCE_ID raiz=$ROOT_VOLUME_ID sandbox=$SANDBOX_VOLUME_ID"
+aws cloudformation describe-stack-resources --stack-name pgguardian \
+  --query 'StackResources[].[LogicalResourceId,ResourceType,PhysicalResourceId,ResourceStatus]' --output table \
+  | tee "docs/aws/evidencia/stack/recursos-antes-de-borrar-$FECHA.txt"
+```
+
+Resultado esperado: los tres identificadores (`i-...` y dos `vol-...`), ninguno vacío ni `None`, y la tabla con los recursos del stack (11, o 9 si se aplicó el plan B). El disco raíz no es un recurso del stack: se obtiene de `describe-instances` (campo `BlockDeviceMappings`), como en 3.2. Si falta algún identificador, no se sigue: sin el ID de un disco no se puede tomar su snapshot.
+
+#### 2.5.2 Desactivar la protección contra terminación del stack (R29.8, R29.9, modifica el stack)
+
+```bash
+aws cloudformation update-termination-protection --no-enable-termination-protection --stack-name pgguardian
+aws cloudformation describe-stacks --stack-name pgguardian \
+  --query 'Stacks[0].EnableTerminationProtection' --output text
+```
+
+Resultado esperado: `False`. Mientras valga `True`, `delete-stack` falla con un error que indica que el stack tiene la protección activa (R29.8).
+
+#### 2.5.3 Desactivar `DisableApiTermination` de la Instancia (R29.9, modifica la Instancia)
+
+Este cambio se hace fuera de CloudFormation y genera *drift*; es la única excepción permitida (2.3), porque el stack se borra justo después. Sin él, CloudFormation no puede terminar la Instancia y el borrado queda en `DELETE_FAILED`.
+
+```bash
+aws ec2 modify-instance-attribute --instance-id "$INSTANCE_ID" --no-disable-api-termination
+aws ec2 describe-instance-attribute --instance-id "$INSTANCE_ID" \
+  --attribute disableApiTermination --query 'DisableApiTermination.Value' --output text
+```
+
+Resultado esperado: `False`.
+
+Evaluación automática de 2.5.2 y 2.5.3:
+
+```bash
+(
+  criterio="sin CA"; requisito="R29.8, R29.9 (protecciones desactivadas antes del borrado)"
+  if [ -z "$INSTANCE_ID" ]; then
+    estado="no_verificable"; detalle="falta INSTANCE_ID; ejecutar 2.5.1"
+  elif ! pst=$(aws cloudformation describe-stacks --stack-name pgguardian \
+       --query 'Stacks[0].EnableTerminationProtection' --output text 2>&1); then
+    estado="no_verificable"; detalle="falló aws cloudformation describe-stacks: $(echo "$pst" | tr '\n' ' ')"
+  elif ! pin=$(aws ec2 describe-instance-attribute --instance-id "$INSTANCE_ID" \
+       --attribute disableApiTermination --query 'DisableApiTermination.Value' --output text 2>&1); then
+    estado="no_verificable"; detalle="falló aws ec2 describe-instance-attribute: $(echo "$pin" | tr '\n' ' ')"
+  else
+    fallos=()
+    [ "$pst" = "False" ] || fallos+=("EnableTerminationProtection=${pst:-ausente} (se esperaba False)")
+    [ "$pin" = "False" ] || fallos+=("disableApiTermination=${pin:-ausente} (se esperaba False)")
+    if [ ${#fallos[@]} -eq 0 ]; then
+      estado="aprobado"; detalle="stack pgguardian con EnableTerminationProtection=False; $INSTANCE_ID con disableApiTermination=False"
+    else
+      estado="no_aprobado"; detalle="no conforme: $(printf '%s; ' "${fallos[@]}" | sed 's/; $//')"
+    fi
+  fi
+  jq -cn --arg c "$criterio" --arg r "$requisito" --arg e "$estado" --arg d "$detalle" \
+    '{criterio: $c, requisito: $r, estado: $e, detalle: $d}'
+)
+```
+
+Si el Equipo decide no seguir con el borrado después de este punto, vuelve a activar ambas protecciones (`update-termination-protection --enable-termination-protection` y `modify-instance-attribute --disable-api-termination`) y repite 2.1.7 y 3.4.2.
+
+#### 2.5.4 Snapshots del disco raíz y del Volumen_Sandbox (R29.9, R23.3)
+
+Se toma un Snapshot_Manual de cada disco con `scripts/aws/manual_snapshot.sh` (tarea 7.4), que crea el snapshot con las etiquetas `Project`, `Env` y `Owner`, espera con `aws ec2 wait snapshot-completed` e informa si termina en `error`. El disco raíz contiene los datos de `app_db` (volumen `pgguardian_app_data`), así que su snapshot es el único respaldo de la aplicación después del borrado.
+
+Para que los datos de PostgreSQL queden coherentes, primero se detiene la aplicación desde una sesión de Session Manager en la Instancia (`sudo docker compose -f docker-compose.prod.yml stop` en el directorio del despliegue). Si la Instancia no responde, se toma el snapshot igualmente y se anota en el `detalle` que no se detuvo la aplicación.
+
+```bash
+scripts/aws/manual_snapshot.sh "$ROOT_VOLUME_ID"      # espera hasta completed
+scripts/aws/manual_snapshot.sh "$SANDBOX_VOLUME_ID"   # espera hasta completed
+```
+
+Si `manual_snapshot.sh` todavía no existe (tarea 7.4 pendiente), se usan los comandos equivalentes. `aws ec2 wait snapshot-completed` consulta cada 15 s durante un máximo de 10 min; si se agota antes de `completed`, se vuelve a ejecutar el `wait` con el mismo ID:
+
+```bash
+OWNER=$(aws ec2 describe-tags --filters "Name=resource-id,Values=$INSTANCE_ID" Name=key,Values=Owner \
+  --query 'Tags[0].Value' --output text)
+for VOL in "$ROOT_VOLUME_ID" "$SANDBOX_VOLUME_ID"; do
+  SNAP=$(aws ec2 create-snapshot --volume-id "$VOL" \
+    --description "PgGuardian: snapshot previo al borrado del stack ($FECHA)" \
+    --tag-specifications "ResourceType=snapshot,Tags=[{Key=Project,Value=PgGuardian},{Key=Env,Value=prod},{Key=Owner,Value=$OWNER}]" \
+    --query SnapshotId --output text)
+  echo "$VOL -> $SNAP"
+  aws ec2 wait snapshot-completed --snapshot-ids "$SNAP"
+done
+```
+
+Evaluación automática del criterio. Busca, para cada disco, el snapshot más reciente con la etiqueta `Project=PgGuardian` y exige que esté en `completed`:
+
+```bash
+(
+  criterio="CA-26"; requisito="R23.3, R29.9 (snapshots previos al borrado)"
+  if [ -z "$ROOT_VOLUME_ID" ] || [ -z "$SANDBOX_VOLUME_ID" ]; then
+    estado="no_verificable"; detalle="faltan ROOT_VOLUME_ID o SANDBOX_VOLUME_ID; ejecutar 2.5.1"
+  elif ! snaps=$(aws ec2 describe-snapshots --owner-ids self \
+       --filters "Name=volume-id,Values=$ROOT_VOLUME_ID,$SANDBOX_VOLUME_ID" Name=tag:Project,Values=PgGuardian \
+       --output json 2>&1); then
+    estado="no_verificable"; detalle="falló aws ec2 describe-snapshots: $(echo "$snaps" | tr '\n' ' ')"
+  else
+    ultimo() { jq -c --arg v "$1" '[.Snapshots[] | select(.VolumeId == $v)] | sort_by(.StartTime) | last
+                 // {} | {id: .SnapshotId, estado: .State, inicio: .StartTime}' <<< "$snaps"; }
+    raiz=$(ultimo "$ROOT_VOLUME_ID"); sb=$(ultimo "$SANDBOX_VOLUME_ID")
+    fallos=()
+    jq -e '.estado == "completed"' <<< "$raiz" >/dev/null || fallos+=("disco raíz $ROOT_VOLUME_ID: último snapshot $raiz")
+    jq -e '.estado == "completed"' <<< "$sb" >/dev/null || fallos+=("Volumen_Sandbox $SANDBOX_VOLUME_ID: último snapshot $sb")
+    if [ ${#fallos[@]} -eq 0 ]; then
+      estado="aprobado"; detalle="raíz $(jq -r '"\(.id) completed (\(.inicio))"' <<< "$raiz"); sandbox $(jq -r '"\(.id) completed (\(.inicio))"' <<< "$sb")"
+    else
+      estado="no_aprobado"; detalle="no conforme: $(printf '%s; ' "${fallos[@]}" | sed 's/; $//')"
+    fi
+  fi
+  jq -cn --arg c "$criterio" --arg r "$requisito" --arg e "$estado" --arg d "$detalle" \
+    '{criterio: $c, requisito: $r, estado: $e, detalle: $d}'
+)
+```
+
+El responsable comprueba en el `detalle` que la fecha de inicio de ambos snapshots es la de hoy: un snapshot antiguo en `completed` (p. ej. el de estabilización de la sección 8) no sustituye al previo al borrado. Ante `no_aprobado`: si un snapshot está en `pending`, se espera y se repite la evaluación; si está en `error`, se repite el snapshot del mismo volumen hasta obtener uno en `completed` (R23.4). **No se ejecuta `delete-stack` sin los dos snapshots en `completed`.**
+
+#### 2.5.5 Borrado del stack (borra recursos)
+
+Solo con 2.5.3 y 2.5.4 en `aprobado`:
+
+```bash
+aws cloudformation delete-stack --stack-name pgguardian
+aws cloudformation wait stack-delete-complete --stack-name pgguardian
+```
+
+El `wait` consulta cada 30 s durante un máximo de 60 min; lo normal son de 3 a 8 minutos. Si falla, se leen los eventos:
+
+```bash
+aws cloudformation describe-stack-events --stack-name pgguardian \
+  --query "StackEvents[?contains(ResourceStatus, 'FAILED')].[Timestamp,LogicalResourceId,ResourceStatus,ResourceStatusReason]" \
+  --output table | tee "docs/aws/evidencia/stack/eventos-borrado-fallido-$FECHA.txt"
+```
+
+Con `Instance` en `DELETE_FAILED` por la protección, se repite 2.5.3. Con otro recurso, se corrige la causa que indica `ResourceStatusReason` y se vuelve a ejecutar `delete-stack`, que reintenta solo lo que quedó sin borrar. No se borran recursos a mano mientras el stack exista.
+
+#### 2.5.6 Comprobación posterior al borrado
+
+Evaluación automática del criterio (solo lee):
+
+```bash
+(
+  criterio="sin CA"; requisito="R29.9 (stack borrado, snapshots conservados)"
+  fallos=(); errores=()
+  if salida=$(aws cloudformation describe-stacks --stack-name pgguardian \
+       --query 'Stacks[0].StackStatus' --output text 2>&1); then
+    fallos+=("el stack pgguardian sigue existiendo con estado $salida")
+  elif ! grep -q 'does not exist' <<< "$salida"; then
+    errores+=("describe-stacks: $(echo "$salida" | tr '\n' ' ')")
+  fi
+  if inst=$(aws ec2 describe-instances --filters Name=tag:Project,Values=PgGuardian \
+       Name=instance-state-name,Values=pending,running,stopping,stopped,shutting-down \
+       --query 'Reservations[].Instances[].InstanceId' --output text 2>&1); then
+    [ -z "$inst" ] || fallos+=("instancias PgGuardian sin terminar: $inst")
+  else errores+=("describe-instances: $(echo "$inst" | tr '\n' ' ')"); fi
+  if vols=$(aws ec2 describe-volumes --volume-ids "$ROOT_VOLUME_ID" "$SANDBOX_VOLUME_ID" \
+       --query 'Volumes[].[VolumeId,State]' --output text 2>&1); then
+    [ -z "$vols" ] || fallos+=("volúmenes que siguen existiendo: $(echo "$vols" | tr '\n\t' '; ')")
+  elif ! grep -q 'InvalidVolume.NotFound' <<< "$vols"; then
+    errores+=("describe-volumes: $(echo "$vols" | tr '\n' ' ')")
+  fi
+  if eips=$(aws ec2 describe-addresses --filters Name=tag:Project,Values=PgGuardian \
+       --query 'Addresses[].PublicIp' --output text 2>&1); then
+    [ -z "$eips" ] || fallos+=("Elastic IP que sigue cobrando: $eips")
+  else errores+=("describe-addresses: $(echo "$eips" | tr '\n' ' ')"); fi
+  if snaps=$(aws ec2 describe-snapshots --owner-ids self --filters Name=tag:Project,Values=PgGuardian \
+       Name=status,Values=completed --query 'Snapshots[].[SnapshotId,VolumeId]' --output text 2>&1); then
+    nsnap=$(grep -c . <<< "$snaps")
+    [ "$nsnap" -ge 2 ] || fallos+=("solo $nsnap snapshots completed con Project=PgGuardian (se esperaban al menos 2)")
+  else errores+=("describe-snapshots: $(echo "$snaps" | tr '\n' ' ')"); fi
+  if [ ${#errores[@]} -gt 0 ]; then
+    estado="no_verificable"; detalle="falló: $(printf '%s; ' "${errores[@]}" | sed 's/; $//')"
+  elif [ ${#fallos[@]} -eq 0 ]; then
+    estado="aprobado"; detalle="stack pgguardian borrado; 0 instancias, 0 volúmenes y 0 Elastic IP del stack; $nsnap snapshots completed conservados"
+  else
+    estado="no_aprobado"; detalle="no conforme: $(printf '%s; ' "${fallos[@]}" | sed 's/; $//')"
+  fi
+  jq -cn --arg c "$criterio" --arg r "$requisito" --arg e "$estado" --arg d "$detalle" \
+    '{criterio: $c, requisito: $r, estado: $e, detalle: $d}'
+)
+```
+
+Resultado esperado: `aprobado`. Ante `no_aprobado` por un recurso que sigue existiendo después de `DELETE_COMPLETE`, se identifica (puede ser ajeno al stack, por ejemplo una Elastic IP creada a mano con la etiqueta) y el Equipo decide si borrarlo; una Elastic IP sin asociar sigue cobrando.
+
+#### 2.5.7 Detección de anomalías después del borrado
+
+Al borrar el stack, la cuenta queda **sin ningún monitor de anomalías**: `CostAnomalyMonitor` y `CostAnomalySubscription` se borran con el stack, y el monitor por defecto (`Default-Services-Monitor`, con `Default-Services-Subscription`) se borró en la comprobación previa de 2.1.3. Su configuración original quedó como evidencia en `docs/aws/evidencia/stack/anomaly-monitors-antes-<fecha>.json` y `anomaly-subscriptions-antes-<fecha>.json`.
+
+Si la cuenta sigue en uso, se vuelve a crear un monitor de servicios desde la consola: **Billing and Cost Management** → **Cost Anomaly Detection** → **Create monitor** → tipo **AWS services**, con una suscripción de alertas por correo (se puede tomar el umbral de la evidencia: 100 USD y 40 %). Se comprueba con:
+
+```bash
+aws ce get-anomaly-monitors --region us-east-1 \
+  --query "AnomalyMonitors[?MonitorType=='DIMENSIONAL'].[MonitorName,MonitorDimension]" --output table
+```
+
+Si se aplicó el plan B (2.4), el monitor y la suscripción de `create_anomaly_detection.sh` no pertenecen al stack y siguen activos después del borrado; no hace falta crear otro.
+
+El presupuesto `MonthlyBudget` también se borra con el stack. Si la cuenta sigue en uso, el Equipo decide si crea otro desde **Billing and Cost Management** → **Budgets**.
+
+La sección 2.5 queda completa cuando 2.5.3, 2.5.4 y 2.5.6 están en `aprobado`. Las líneas se guardan en `docs/aws/evidencia/stack/` junto con las tablas de 2.5.1 y 2.5.5.
 
 ## 3. Instancia
 
-Pendiente: tarea 5.3 (Security Group, IMDS, volúmenes, etiquetas y Elastic IP) y tarea 6.1 (acceso sin SSH).
+Pendiente: tarea 6.1 (acceso sin SSH: `KeyName`, puerto 22 y evento `StartSession` en CloudTrail).
 
 ### 3.1 Rol `PgGuardian-EC2-Role` y perfil de instancia (T-11 · RF-05.4 · CA-17 · R10.1, R10.2)
 
@@ -1196,7 +1432,771 @@ Cómo se interpreta 3.1:
 | Falta la política, la Instancia no tiene perfil o tiene otro, o hay claves en disco | `no_aprobado` | R10.1 / R10.2 |
 | El stack, el rol o IMDS no responden | `no_verificable` | — |
 
-CA-17 queda aprobado para el rol solo si 3.1.1, 3.1.2 y 3.1.3 están en `aprobado`. La parte de CA-17 sobre el registro `Online` en Systems Manager (R10.3) se verifica aparte.
+CA-17 queda aprobado para el rol solo si 3.1.1, 3.1.2 y 3.1.3 están en `aprobado`. La parte de CA-17 sobre el registro `Online` en Systems Manager (R10.3, R10.4) se verifica en 3.4.3.
+
+### 3.2 Preparación: outputs del stack e identificadores (T-12 a T-15)
+
+Las verificaciones de 3.3 a 3.8 usan los outputs `InstanceId`, `PublicIp` y `SandboxVolumeId` del stack (lectura descrita en 2.2) y tres identificadores que se derivan de ellos. Se cargan una vez por sesión de CloudShell (`us-east-2`, Usuario_IAM con MFA). Los bloques de evaluación son subshells `( ... )` y heredan estas variables y funciones; si la sesión de CloudShell se reinicia, se vuelve a ejecutar este bloque.
+
+```bash
+cd PgGuardian-Online
+mkdir -p docs/aws/evidencia/instancia
+FECHA=$(date -u +%Y%m%dT%H%MZ)
+output_stack() {
+  aws cloudformation describe-stacks --stack-name pgguardian \
+    --query "Stacks[0].Outputs[?OutputKey=='$1'].OutputValue" --output text
+}
+INSTANCE_ID=$(output_stack InstanceId)
+PUBLIC_IP=$(output_stack PublicIp)
+SANDBOX_VOLUME_ID=$(output_stack SandboxVolumeId)
+ROOT_VOLUME_ID=$(aws ec2 describe-instances --instance-ids "$INSTANCE_ID" --output json \
+  | jq -r '.Reservations[0].Instances[0] as $i | $i.BlockDeviceMappings[]
+           | select(.DeviceName == $i.RootDeviceName) | .Ebs.VolumeId')
+SG_ID=$(aws ec2 describe-instances --instance-ids "$INSTANCE_ID" \
+  --query 'Reservations[0].Instances[0].SecurityGroups[0].GroupId' --output text)
+EIP_ALLOC_ID=$(aws ec2 describe-addresses --public-ips "$PUBLIC_IP" \
+  --query 'Addresses[0].AllocationId' --output text)
+echo "instancia=$INSTANCE_ID ip=$PUBLIC_IP raiz=$ROOT_VOLUME_ID sandbox=$SANDBOX_VOLUME_ID sg=$SG_ID eip=$EIP_ALLOC_ID"
+
+# Ejecuta un comando en la Instancia por Run Command (lo usa 3.6.3) y devuelve su salida.
+# Falla si el comando no termina en Success.
+ssm_run() {
+  local cid st
+  cid=$(aws ssm send-command --instance-ids "$INSTANCE_ID" --document-name AWS-RunShellScript \
+    --parameters "$(jq -cn --arg c "$1" '{commands: [$c]}')" \
+    --query Command.CommandId --output text 2>/dev/null) || return 1
+  aws ssm wait command-executed --command-id "$cid" --instance-id "$INSTANCE_ID" 2>/dev/null
+  st=$(aws ssm get-command-invocation --command-id "$cid" --instance-id "$INSTANCE_ID" \
+    --query Status --output text 2>/dev/null) || return 1
+  [ "$st" = "Success" ] || return 1
+  aws ssm get-command-invocation --command-id "$cid" --instance-id "$INSTANCE_ID" \
+    --query StandardOutputContent --output text
+}
+```
+
+Resultado esperado: la línea `echo` muestra los seis valores (`i-...`, una IPv4, dos `vol-...`, `sg-...` y `eipalloc-...`), ninguno vacío ni `None`. Si falta alguno, el stack no está en `CREATE_COMPLETE` o `UPDATE_COMPLETE`; se revisa la sección 2 antes de seguir. Cada bloque de evaluación comprueba de nuevo las variables que usa y da `no_verificable` si falta alguna.
+
+Las líneas «Resultado de verificación» de esta sección se agregan a `docs/aws/evidencia/instancia/verificacion-instancia.jsonl` (p. ej. terminando el bloque con `| tee -a docs/aws/evidencia/instancia/verificacion-instancia.jsonl`). Los bloques que se ejecutan dentro de la Instancia (3.5 y 3.6.2) se copian de la sesión de Session Manager al mismo archivo.
+
+Orden y momento de cada verificación:
+
+| Bloque | Dónde | Cuándo | Modifica algo |
+| --- | --- | --- | --- |
+| 3.3.1, 3.3.3, 3.4, 3.6.1, 3.7, 3.8.1 | CloudShell | Tras 2.2 | No (3.4.2 envía una solicitud de terminación que debe ser rechazada) |
+| 3.5.1 | Instancia (Session Manager) | Tras 2.2 | No |
+| 3.5.2, 3.6.2 | Instancia (Session Manager) | Tras `bootstrap_host.sh` (tarea 6.1, sección 4) | No |
+| 3.6.3 | CloudShell | Tras la tarea 6.1 | Sí: reinicia la Instancia |
+| 3.3.2 | CloudShell | Tras el despliegue (sección 5): sin Caddy escuchando, 80 y 443 aparecen `closed` y no `open` | No |
+| 3.8.2 | CloudShell | Cuando el Equipo acepte una caída de unos minutos | Sí: detiene e inicia la Instancia |
+
+### 3.3 Security Group (T-12 · RF-06.1 · CA-18 · R11.1, R12)
+
+Condiciones:
+
+| Condición | Requisito | Verificación |
+| --- | --- | --- |
+| La Instancia tiene un único Security Group, con exactamente 2 reglas de entrada: TCP/80 y TCP/443 desde `0.0.0.0/0` | R12.1, R12.2 | 3.3.1 |
+| 0 reglas de entrada que cubran TCP/22 y 0 reglas IPv6 (`::/0`) | R11.1, R12.2 | 3.3.1 |
+| Desde fuera de la VPC, `nmap -Pn -p-` muestra solo 80 y 443 `open`; los 65533 restantes `filtered` o `closed` | R12.3 | 3.3.2 |
+| Una conexión TCP a otro puerto agota el tiempo o es rechazada, sin sesión | R12.4 | 3.3.3 |
+
+El Security Group (`AppSecurityGroup`) lo crea la plantilla. Si alguna verificación da `no_aprobado`, la corrección se hace en la plantilla y se aplica con un change set (2.3), nunca editando las reglas en la consola (eso genera *drift*).
+
+#### 3.3.1 Reglas del Security Group (R11.1, R12.1, R12.2)
+
+Consulta directa:
+
+```bash
+aws ec2 describe-security-groups --group-ids "$SG_ID" \
+  --query 'SecurityGroups[0].IpPermissions' --output json \
+  | tee "docs/aws/evidencia/instancia/sg-ingress-$FECHA.json"
+aws ec2 describe-security-group-rules --filters Name=group-id,Values="$SG_ID" \
+  --query 'SecurityGroupRules[?IsEgress==`false`].[IpProtocol,FromPort,ToPort,CidrIpv4,CidrIpv6]' --output table
+```
+
+Resultado esperado: dos filas, `tcp 80 80 0.0.0.0/0 None` y `tcp 443 443 0.0.0.0/0 None`, y en `IpPermissions` ningún `Ipv6Ranges` con contenido.
+
+Evaluación automática del criterio:
+
+```bash
+(
+  criterio="CA-18"; requisito="R11.1, R12.1, R12.2"
+  esperadas='[{"p":"tcp","d":80,"h":80,"v4":"0.0.0.0/0","v6":null,"pl":null,"sg":null},
+              {"p":"tcp","d":443,"h":443,"v4":"0.0.0.0/0","v6":null,"pl":null,"sg":null}]'
+  if [ -z "$INSTANCE_ID" ] || [ -z "$SG_ID" ] || [ "$SG_ID" = "None" ]; then
+    estado="no_verificable"; detalle="faltan INSTANCE_ID o SG_ID; ejecutar 3.2"
+  elif ! nsg=$(aws ec2 describe-instances --instance-ids "$INSTANCE_ID" \
+       --query 'length(Reservations[0].Instances[0].SecurityGroups)' --output text 2>&1); then
+    estado="no_verificable"; detalle="falló aws ec2 describe-instances: $(echo "$nsg" | tr '\n' ' ')"
+  elif ! reglas=$(aws ec2 describe-security-group-rules \
+       --filters Name=group-id,Values="$SG_ID" --output json 2>&1); then
+    estado="no_verificable"; detalle="falló aws ec2 describe-security-group-rules: $(echo "$reglas" | tr '\n' ' ')"
+  else
+    entrada=$(jq -c '[.SecurityGroupRules[] | select(.IsEgress == false)
+      | {p: .IpProtocol, d: .FromPort, h: .ToPort, v4: (.CidrIpv4 // null), v6: (.CidrIpv6 // null),
+         pl: (.PrefixListId // null), sg: (.ReferencedGroupInfo.GroupId // null)}] | sort_by(.d)' <<< "$reglas")
+    n=$(jq 'length' <<< "$entrada")
+    p22=$(jq '[.[] | select(.p == "-1" or ((.p == "tcp" or .p == "6") and .d <= 22 and .h >= 22))] | length' <<< "$entrada")
+    v6=$(jq '[.[] | select(.v6 != null)] | length' <<< "$entrada")
+    fallos=()
+    [ "$nsg" = "1" ] || fallos+=("la instancia tiene $nsg security groups (se esperaba 1)")
+    [ "$n" -eq 2 ] || fallos+=("$n reglas de entrada (se esperaban 2)")
+    [ "$p22" -eq 0 ] || fallos+=("$p22 reglas de entrada cubren TCP/22")
+    [ "$v6" -eq 0 ] || fallos+=("$v6 reglas de entrada IPv6")
+    jq -e --argjson e "$esperadas" '. == ($e | sort_by(.d))' <<< "$entrada" >/dev/null \
+      || fallos+=("reglas distintas de TCP/80 y TCP/443 desde 0.0.0.0/0: $entrada")
+    if [ ${#fallos[@]} -eq 0 ]; then
+      estado="aprobado"
+      detalle="$SG_ID: 2 reglas de entrada (tcp/80 y tcp/443 desde 0.0.0.0/0); 0 para TCP/22; 0 IPv6"
+    else
+      estado="no_aprobado"
+      detalle="no conforme: $(printf '%s; ' "${fallos[@]}" | sed 's/; $//')"
+    fi
+  fi
+  jq -cn --arg c "$criterio" --arg r "$requisito" --arg e "$estado" --arg d "$detalle" \
+    '{criterio: $c, requisito: $r, estado: $e, detalle: $d}'
+)
+```
+
+#### 3.3.2 Escaneo de puertos con `nmap` (R12.3)
+
+Se ejecuta después del despliegue (sección 5), porque sin Caddy escuchando la Instancia responde con RST y 80/443 aparecen `closed`. CloudShell (entorno sin VPC) sale a internet por la red de AWS, fuera de la VPC del stack, así que cuenta como red externa; también puede ejecutarse desde el equipo de un integrante con `nmap` instalado. La evidencia formal del Paquete_Evidencia se genera con `scripts/aws/run_nmap.sh` (tarea 9.2); este paso es la verificación de CA-18.
+
+```bash
+command -v nmap || sudo dnf install -y nmap
+nmap -Pn -p- -T4 --min-rate 1000 -oN "docs/aws/evidencia/instancia/nmap-$FECHA.txt" "$PUBLIC_IP"
+```
+
+Resultado esperado (tarda de 1 a 5 minutos):
+
+```text
+PORT    STATE SERVICE
+80/tcp  open  http
+443/tcp open  https
+```
+
+con una línea `Not shown: 65533 filtered tcp ports (no-response)` (o `closed`) y `# Nmap done ... (1 host up)` al final del archivo.
+
+Evaluación automática del criterio, sobre el archivo generado:
+
+```bash
+(
+  criterio="CA-18"; requisito="R12.3"
+  f="docs/aws/evidencia/instancia/nmap-$FECHA.txt"
+  if [ ! -s "$f" ] || ! grep -q 'Nmap done.*1 host up' "$f"; then
+    estado="no_verificable"; detalle="falta la salida completa de nmap en $f o el escaneo no terminó"
+  else
+    abiertos=$(awk '$1 ~ /^[0-9]+\/tcp$/ && $2 == "open" {split($1, a, "/"); print a[1]}' "$f" | sort -n | paste -sd, -)
+    otros=$(awk '$1 ~ /^[0-9]+\/tcp$/ && $2 != "open" && $2 != "closed" && $2 != "filtered" {print $1 "=" $2}' "$f" | paste -sd, -)
+    oculto=$(grep -m1 '^Not shown' "$f")
+    if [ "$abiertos" = "80,443" ] && [ -z "$otros" ]; then
+      estado="aprobado"; detalle="$PUBLIC_IP: abiertos 80,443; ${oculto:-sin línea Not shown}; archivo $f"
+    else
+      estado="no_aprobado"
+      detalle="no conforme: abiertos=${abiertos:-ninguno} (se esperaba 80,443); otros estados=${otros:-ninguno}; archivo $f"
+    fi
+  fi
+  jq -cn --arg c "$criterio" --arg r "$requisito" --arg e "$estado" --arg d "$detalle" \
+    '{criterio: $c, requisito: $r, estado: $e, detalle: $d}'
+)
+```
+
+Si 80 o 443 aparecen `closed`, la causa habitual es que la aplicación no está desplegada o Caddy no arrancó (sección 5), no el Security Group. Si aparece otro puerto `open`, se revisa 3.3.1: con las reglas conformes, ningún otro puerto puede quedar abierto desde fuera.
+
+#### 3.3.3 Conexión a un puerto no permitido (R12.4)
+
+Prueba con los puertos de SSH, PostgreSQL, la API interna y RDP. Cada intento espera como máximo 6 segundos:
+
+```bash
+(
+  criterio="CA-18"; requisito="R12.4"
+  if [ -z "$PUBLIC_IP" ]; then
+    estado="no_verificable"; detalle="falta PUBLIC_IP; ejecutar 3.2"
+  else
+    abiertos=(); cerrados=()
+    for p in 22 5432 8000 3389; do
+      if timeout 6 bash -c "exec 3<>/dev/tcp/$PUBLIC_IP/$p" 2>/dev/null; then
+        abiertos+=("$p")
+      else
+        cerrados+=("$p")
+      fi
+    done
+    if [ ${#abiertos[@]} -eq 0 ]; then
+      estado="aprobado"; detalle="$PUBLIC_IP: sin conexión (tiempo agotado o rechazo) en TCP ${cerrados[*]}"
+    else
+      estado="no_aprobado"; detalle="no conforme: se estableció conexión TCP en ${abiertos[*]}"
+    fi
+  fi
+  jq -cn --arg c "$criterio" --arg r "$requisito" --arg e "$estado" --arg d "$detalle" \
+    '{criterio: $c, requisito: $r, estado: $e, detalle: $d}'
+)
+```
+
+Resultado esperado: `aprobado`; cada intento termina por tiempo agotado (el Security Group descarta el paquete). La parte de R11.5 (SSH) se documenta además en la verificación de acceso sin SSH de la tarea 6.1.
+
+Cómo se interpreta 3.3:
+
+| Salida | `estado` | Requisito |
+| --- | --- | --- |
+| 2 reglas TCP/80 y TCP/443 desde `0.0.0.0/0`, sin TCP/22 ni IPv6 | `aprobado` | R11.1, R12.1, R12.2 |
+| `nmap` con solo 80 y 443 `open` | `aprobado` | R12.3 |
+| Ninguna conexión a 22, 5432, 8000 ni 3389 | `aprobado` | R12.4 |
+| Regla de más, regla para 22, regla IPv6, otro puerto abierto o conexión establecida | `no_aprobado` | R11.1, R12 |
+| Falta un identificador, falla la CLI o el escaneo no terminó | `no_verificable` | — |
+
+### 3.4 Instancia: metadatos, protección contra terminación y Systems Manager (T-13 · CA-17, CA-19, CA-20 · R10.3, R10.4, R13.1, R16)
+
+Condiciones:
+
+| Condición | Requisito | Verificación |
+| --- | --- | --- |
+| `HttpTokens=required`, `HttpEndpoint=enabled` y `HttpPutResponseHopLimit=1` | R13.1 | 3.4.1 |
+| `disableApiTermination=true` tras el aprovisionamiento | R16.1, R16.4 | 3.4.2 |
+| `terminate-instances` es rechazado con un error que indica la protección y la Instancia sigue en su estado | R16.3 | 3.4.2 |
+| La protección se conserva tras un reinicio | R16.2 | 3.6.3 |
+| La Instancia aparece `Online` en Systems Manager en un máximo de 300 s desde `running`; si no, se reporta el fallo sin modificar el Rol_EC2 ni los recursos | R10.3, R10.4 | 3.4.3 |
+
+El cifrado de los discos se verifica en 3.6.
+
+#### 3.4.1 Opciones de metadatos (R13.1)
+
+Consulta directa:
+
+```bash
+aws ec2 describe-instances --instance-ids "$INSTANCE_ID" \
+  --query 'Reservations[0].Instances[0].MetadataOptions'
+```
+
+Resultado esperado: `"State": "applied"`, `"HttpTokens": "required"`, `"HttpPutResponseHopLimit": 1` y `"HttpEndpoint": "enabled"`.
+
+Evaluación automática del criterio:
+
+```bash
+(
+  criterio="CA-19"; requisito="R13.1"
+  if [ -z "$INSTANCE_ID" ]; then
+    estado="no_verificable"; detalle="falta INSTANCE_ID; ejecutar 3.2"
+  elif ! md=$(aws ec2 describe-instances --instance-ids "$INSTANCE_ID" \
+       --query 'Reservations[0].Instances[0].MetadataOptions.[HttpTokens,HttpEndpoint,HttpPutResponseHopLimit,State]' \
+       --output text 2>&1); then
+    estado="no_verificable"; detalle="falló aws ec2 describe-instances: $(echo "$md" | tr '\n' ' ')"
+  else
+    read -r tok ep hop st <<< "$md"
+    fallos=()
+    [ "$tok" = "required" ] || fallos+=("HttpTokens=${tok:-ausente} (se esperaba required)")
+    [ "$ep" = "enabled" ] || fallos+=("HttpEndpoint=${ep:-ausente} (se esperaba enabled)")
+    [ "$hop" = "1" ] || fallos+=("HttpPutResponseHopLimit=${hop:-ausente} (se esperaba 1)")
+    [ "$st" = "applied" ] || fallos+=("State=${st:-ausente} (se esperaba applied)")
+    if [ ${#fallos[@]} -eq 0 ]; then
+      estado="aprobado"; detalle="$INSTANCE_ID: HttpTokens=required, HttpEndpoint=enabled, HttpPutResponseHopLimit=1"
+    else
+      estado="no_aprobado"; detalle="no conforme: $(printf '%s; ' "${fallos[@]}" | sed 's/; $//')"
+    fi
+  fi
+  jq -cn --arg c "$criterio" --arg r "$requisito" --arg e "$estado" --arg d "$detalle" \
+    '{criterio: $c, requisito: $r, estado: $e, detalle: $d}'
+)
+```
+
+#### 3.4.2 Protección contra terminación (R16.1, R16.3, R16.4)
+
+> **Atención.** Este bloque envía una solicitud real de `terminate-instances`. Solo es seguro porque antes comprueba que `disableApiTermination` vale `true` y, si no, no la envía. No se ejecuta `terminate-instances` a mano fuera de este bloque, y no se usa `--dry-run`: `--dry-run` solo comprueba permisos IAM y no prueba la protección.
+
+Consulta directa (solo lectura):
+
+```bash
+aws ec2 describe-instance-attribute --instance-id "$INSTANCE_ID" --attribute disableApiTermination
+```
+
+Resultado esperado: `"DisableApiTermination": { "Value": true }`.
+
+Evaluación automática del criterio:
+
+```bash
+(
+  criterio="CA-20"; requisito="R16.1, R16.3, R16.4"
+  if [ -z "$INSTANCE_ID" ]; then
+    estado="no_verificable"; detalle="falta INSTANCE_ID; ejecutar 3.2"
+  elif ! prot=$(aws ec2 describe-instance-attribute --instance-id "$INSTANCE_ID" \
+       --attribute disableApiTermination --query 'DisableApiTermination.Value' --output text 2>&1); then
+    estado="no_verificable"; detalle="falló aws ec2 describe-instance-attribute: $(echo "$prot" | tr '\n' ' ')"
+  elif [ "$prot" != "True" ]; then
+    estado="no_aprobado"
+    detalle="no conforme: disableApiTermination=${prot:-ausente} (se esperaba true); no se envió terminate-instances"
+  else
+    antes=$(aws ec2 describe-instances --instance-ids "$INSTANCE_ID" \
+      --query 'Reservations[0].Instances[0].State.Name' --output text 2>/dev/null)
+    if salida=$(aws ec2 terminate-instances --instance-ids "$INSTANCE_ID" 2>&1); then
+      estado="no_aprobado"
+      detalle="CRÍTICO: terminate-instances fue aceptado: $(echo "$salida" | tr '\n' ' ')"
+    elif ! grep -q 'OperationNotPermitted' <<< "$salida"; then
+      estado="no_verificable"
+      detalle="terminate-instances falló por otra causa (no prueba la protección): $(echo "$salida" | tr '\n' ' ')"
+    else
+      sleep 10
+      despues=$(aws ec2 describe-instances --instance-ids "$INSTANCE_ID" \
+        --query 'Reservations[0].Instances[0].State.Name' --output text 2>/dev/null)
+      if [ -n "$antes" ] && [ "$despues" = "$antes" ]; then
+        estado="aprobado"
+        detalle="disableApiTermination=true; terminate-instances rechazado con OperationNotPermitted; estado $antes -> $despues"
+      else
+        estado="no_aprobado"
+        detalle="no conforme: terminate-instances rechazado, pero el estado cambió de ${antes:-?} a ${despues:-?}"
+      fi
+    fi
+  fi
+  jq -cn --arg c "$criterio" --arg r "$requisito" --arg e "$estado" --arg d "$detalle" \
+    '{criterio: $c, requisito: $r, estado: $e, detalle: $d}'
+)
+```
+
+Resultado esperado: `aprobado`. El error que devuelve AWS tiene la forma `An error occurred (OperationNotPermitted) when calling the TerminateInstances operation: The instance '<id>' may not be terminated. Modify its 'disableApiTermination' instance attribute and try again.`, y la Instancia sigue `running`.
+
+Ante `no_aprobado` por `disableApiTermination` distinto de `true` (R16.4): se reporta la Instancia como no conforme con CA-20 y se revisa la plantilla (`DisableApiTermination: true`) y el *drift* del stack (`aws cloudformation detect-stack-drift --stack-name pgguardian`); el valor se restablece con un change set (2.3). Si el resultado es «CRÍTICO», la Instancia se está terminando: se avisa al Equipo de inmediato, se restaura desde el último Snapshot_Manual (sección 8) y se registra el incidente.
+
+#### 3.4.3 Registro `Online` en Systems Manager en 300 s (R10.3, R10.4)
+
+La medida es válida cuando el bloque se ejecuta justo después de que la Instancia pasa a `running`: tras 2.1.6 en el primer despliegue, o tras `start-instances` (3.8.2 y sección 6). Si la Instancia lleva tiempo encendida, el bloque solo confirma que sigue `Online`.
+
+Consulta directa:
+
+```bash
+aws ssm describe-instance-information \
+  --filters "Key=InstanceIds,Values=$INSTANCE_ID" \
+  --query 'InstanceInformationList[0].[InstanceId,PingStatus,LastPingDateTime,AgentVersion,PlatformName]' --output table
+```
+
+Resultado esperado: `PingStatus` igual a `Online`.
+
+Evaluación automática del criterio (espera hasta 300 s):
+
+```bash
+(
+  criterio="CA-17"; requisito="R10.3, R10.4"
+  if [ -z "$INSTANCE_ID" ]; then
+    estado="no_verificable"; detalle="falta INSTANCE_ID; ejecutar 3.2"
+  elif ! aws ec2 wait instance-running --instance-ids "$INSTANCE_ID" 2>/dev/null; then
+    estado="no_verificable"; detalle="la instancia $INSTANCE_ID no llegó a running; revisar la sección 2 o 6"
+  else
+    SECONDS=0; ping=""
+    while :; do
+      ping=$(aws ssm describe-instance-information --filters "Key=InstanceIds,Values=$INSTANCE_ID" \
+        --query 'InstanceInformationList[0].PingStatus' --output text 2>/dev/null)
+      [ "$ping" = "Online" ] && break
+      [ "$SECONDS" -ge 300 ] && break
+      sleep 10
+    done
+    if [ "$ping" = "Online" ]; then
+      estado="aprobado"; detalle="$INSTANCE_ID Online en Systems Manager a los ${SECONDS} s de comprobar running"
+    else
+      estado="no_aprobado"
+      detalle="no conforme: la instancia $INSTANCE_ID no es administrable por SSM: PingStatus=${ping:-sin registro} tras 300 s; no se modificó el Rol_EC2 ni los recursos"
+    fi
+  fi
+  jq -cn --arg c "$criterio" --arg r "$requisito" --arg e "$estado" --arg d "$detalle" \
+    '{criterio: $c, requisito: $r, estado: $e, detalle: $d}'
+)
+```
+
+Ante `no_aprobado` (R10.4) se reporta el fallo y **no** se modifica el Rol_EC2, el perfil ni la Instancia. Se diagnostica solo leyendo: 3.1.1 y 3.1.2 (rol y perfil), la regla de salida del Security Group (`describe-security-groups`, debe permitir todo el tráfico de salida para llegar a los endpoints de SSM), `HttpTokens`/`HttpPutResponseHopLimit` (3.4.1; el agente corre en el host y no se ve afectado) y la salida de consola (`aws ec2 get-console-output --instance-id "$INSTANCE_ID" --latest --output text`). Cualquier corrección se decide con el Equipo y se aplica por change set.
+
+### 3.5 IMDSv2 desde la Instancia y desde un contenedor (T-13 · RF-06.2 · CA-19 · R13.2 a R13.5)
+
+Condiciones:
+
+| Condición | Requisito | Verificación |
+| --- | --- | --- |
+| `GET /latest/meta-data/` sin token responde 401 sin metadatos | R13.2 | 3.5.1 |
+| `PUT /latest/api/token` y `GET` con el token responden 200 con la lista de categorías | R13.3 | 3.5.1 |
+| `GET` con un token inválido o expirado responde 401 sin metadatos | R13.4 | 3.5.1 |
+| Desde un contenedor en la red bridge, `PUT /latest/api/token` falla o agota el tiempo en ≤ 5 s, y el agente SSM del host sigue `Online` | R13.5 | 3.5.2 y 3.4.3 |
+
+#### 3.5.1 Pruebas 401/200/401 desde la Instancia (R13.2, R13.3, R13.4)
+
+Se ejecuta dentro de la Instancia, en una sesión de Session Manager. Solo lee; no imprime el token. Para el token expirado se pide uno con TTL de 1 s y se usa 3 s después.
+
+```bash
+(
+  criterio="CA-19"; requisito="R13.2, R13.3, R13.4"
+  url=http://169.254.169.254/latest
+  tmp=$(mktemp -d); fallos=()
+  c1=$(curl -s -m 5 -o "$tmp/1" -w '%{http_code}' "$url/meta-data/")
+  tok=$(curl -s -m 5 -X PUT "$url/api/token" -H 'X-aws-ec2-metadata-token-ttl-seconds: 60')
+  c2=$(curl -s -m 5 -o "$tmp/2" -w '%{http_code}' -H "X-aws-ec2-metadata-token: $tok" "$url/meta-data/")
+  c3=$(curl -s -m 5 -o "$tmp/3" -w '%{http_code}' -H "X-aws-ec2-metadata-token: token-invalido-$RANDOM" "$url/meta-data/")
+  tok1=$(curl -s -m 5 -X PUT "$url/api/token" -H 'X-aws-ec2-metadata-token-ttl-seconds: 1')
+  sleep 3
+  c4=$(curl -s -m 5 -o "$tmp/4" -w '%{http_code}' -H "X-aws-ec2-metadata-token: $tok1" "$url/meta-data/")
+  if [ "$c1$c2$c3$c4" = "000000000000" ]; then
+    estado="no_verificable"; detalle="IMDS no respondió a ninguna solicitud (HTTP 000)"
+  else
+    [ "$c1" = "401" ] || fallos+=("sin token: HTTP $c1 (se esperaba 401)")
+    grep -q 'ami-id' "$tmp/1" && fallos+=("sin token: el cuerpo trae metadatos")
+    { [ -n "$tok" ] && [ "$c2" = "200" ] && grep -qx 'ami-id' "$tmp/2"; } \
+      || fallos+=("con token: HTTP $c2 o sin lista de categorías (se esperaba 200 con ami-id)")
+    [ "$c3" = "401" ] || fallos+=("token inválido: HTTP $c3 (se esperaba 401)")
+    grep -q 'ami-id' "$tmp/3" && fallos+=("token inválido: el cuerpo trae metadatos")
+    [ "$c4" = "401" ] || fallos+=("token expirado: HTTP $c4 (se esperaba 401)")
+    grep -q 'ami-id' "$tmp/4" && fallos+=("token expirado: el cuerpo trae metadatos")
+    if [ ${#fallos[@]} -eq 0 ]; then
+      estado="aprobado"; detalle="sin token 401; token válido 200 ($(wc -l < "$tmp/2") categorías); token inválido 401; token expirado 401; sin metadatos en las respuestas 401"
+    else
+      estado="no_aprobado"; detalle="no conforme: $(printf '%s; ' "${fallos[@]}" | sed 's/; $//')"
+    fi
+  fi
+  rm -rf "$tmp"
+  jq -cn --arg c "$criterio" --arg r "$requisito" --arg e "$estado" --arg d "$detalle" \
+    '{criterio: $c, requisito: $r, estado: $e, detalle: $d}'
+)
+```
+
+Resultado esperado: `aprobado`. Si `jq` no está en la Instancia, se instala con `sudo apt-get install -y jq` (igual que en 3.1.3). Un 200 sin token indica `HttpTokens=optional`: se repite 3.4.1.
+
+#### 3.5.2 IMDS desde un contenedor (R13.5)
+
+Se ejecuta dentro de la Instancia, en Session Manager, después de instalar Docker con `bootstrap_host.sh` (tarea 6.1). La imagen se descarga antes, para que la medida de tiempo no incluya la descarga. El contenedor usa la red bridge por defecto, que añade un salto; con `HttpPutResponseHopLimit=1` la respuesta del `PUT` no llega.
+
+```bash
+IMG=curlimages/curl:latest
+sudo docker pull "$IMG"
+(
+  criterio="CA-19"; requisito="R13.5"
+  if ! command -v docker >/dev/null; then
+    estado="no_verificable"; detalle="Docker no está instalado; repetir tras bootstrap_host.sh (tarea 6.1)"
+  else
+    SECONDS=0
+    codigo=$(sudo docker run --rm "$IMG" -s -m 5 -o /dev/null -w '%{http_code}' -X PUT \
+      http://169.254.169.254/latest/api/token -H 'X-aws-ec2-metadata-token-ttl-seconds: 60' 2>/dev/null)
+    rc=$?; seg=$SECONDS
+    if [ "$rc" -eq 125 ] || [ "$rc" -eq 126 ] || [ "$rc" -eq 127 ]; then
+      estado="no_verificable"; detalle="docker run no pudo iniciar el contenedor (código $rc)"
+    elif [ "$rc" -ne 0 ] && [ "${codigo:-000}" = "000" ]; then
+      estado="aprobado"
+      detalle="PUT /latest/api/token desde un contenedor bridge falló (curl código $rc, 28 = tiempo agotado) en ${seg} s con curl -m 5; sin token"
+    else
+      estado="no_aprobado"
+      detalle="no conforme: el contenedor obtuvo respuesta HTTP $codigo (curl código $rc); revisar HttpPutResponseHopLimit en 3.4.1"
+    fi
+  fi
+  jq -cn --arg c "$criterio" --arg r "$requisito" --arg e "$estado" --arg d "$detalle" \
+    '{criterio: $c, requisito: $r, estado: $e, detalle: $d}'
+)
+```
+
+Resultado esperado: `aprobado` con curl código 28 (tiempo agotado). `curl -m 5` limita la solicitud a 5 s; los segundos del `detalle` incluyen además el arranque del contenedor (1 o 2 s). Justo después, en CloudShell, se repite 3.4.3: el agente SSM corre en el host, no en un contenedor, y debe seguir `Online`. R13.5 queda aprobado solo con las dos líneas en `aprobado`.
+
+### 3.6 Volúmenes cifrados y montaje del Volumen_Sandbox (T-13, T-14 · RF-06.3, RF-04.4 · CA-20, CA-12 · R4.6, R14)
+
+Condiciones:
+
+| Condición | Requisito | Verificación |
+| --- | --- | --- |
+| Disco raíz gp3 de 20 GB con `Encrypted=true` | R14.1 | 3.6.1 |
+| Volumen_Sandbox gp3 de 8 GB con `Encrypted=true`, adjunto en `/dev/sdf` | R14.2 | 3.6.1 |
+| Ningún volumen sin cifrar adjunto a la Instancia | R14.5 | 3.6.1 |
+| `df -h /srv/sandbox` muestra un dispositivo distinto de `df -h /`, y es el Volumen_Sandbox | R4.6, R14.2 | 3.6.2 |
+| Tras un reinicio, la Instancia vuelve en ≤ 300 s con ambos volúmenes cifrados, `/srv/sandbox` montado y `disableApiTermination=true` | R14.3, R16.2 | 3.6.3 |
+| Si no vuelve en 300 s o `/srv/sandbox` no está montado, los datos de ambos volúmenes se conservan sin tocarlos y R14.3 se da por fallido | R14.4 | 3.6.3 |
+
+#### 3.6.1 Tipo, tamaño y cifrado (R14.1, R14.2, R14.5)
+
+Consulta directa:
+
+```bash
+aws ec2 describe-volumes --filters Name=attachment.instance-id,Values="$INSTANCE_ID" \
+  --query 'Volumes[].[VolumeId,VolumeType,Size,Encrypted,Attachments[0].Device,Attachments[0].State]' --output table \
+  | tee "docs/aws/evidencia/instancia/volumes-$FECHA.txt"
+```
+
+Resultado esperado: dos filas, `<ROOT_VOLUME_ID> gp3 20 True /dev/sda1 attached` y `<SANDBOX_VOLUME_ID> gp3 8 True /dev/sdf attached`.
+
+Evaluación automática del criterio:
+
+```bash
+(
+  criterio="CA-20"; requisito="R14.1, R14.2, R14.5"
+  if [ -z "$INSTANCE_ID" ] || [ -z "$ROOT_VOLUME_ID" ] || [ -z "$SANDBOX_VOLUME_ID" ]; then
+    estado="no_verificable"; detalle="faltan INSTANCE_ID, ROOT_VOLUME_ID o SANDBOX_VOLUME_ID; ejecutar 3.2"
+  elif ! vols=$(aws ec2 describe-volumes --filters Name=attachment.instance-id,Values="$INSTANCE_ID" \
+       --output json 2>&1); then
+    estado="no_verificable"; detalle="falló aws ec2 describe-volumes: $(echo "$vols" | tr '\n' ' ')"
+  else
+    resumen=$(jq -c '[.Volumes[] | {id: .VolumeId, tipo: .VolumeType, gb: .Size, cifrado: .Encrypted,
+                     dev: .Attachments[0].Device, estado: .Attachments[0].State}]' <<< "$vols")
+    raiz=$(jq -c --arg v "$ROOT_VOLUME_ID" '(map(select(.id == $v)) | .[0]) // {}' <<< "$resumen")
+    sb=$(jq -c --arg v "$SANDBOX_VOLUME_ID" '(map(select(.id == $v)) | .[0]) // {}' <<< "$resumen")
+    n=$(jq 'length' <<< "$resumen")
+    sin_cifrar=$(jq -c '[.[] | select(.cifrado != true) | .id]' <<< "$resumen")
+    fallos=()
+    jq -e '.tipo == "gp3" and .gb == 20 and .cifrado == true' <<< "$raiz" >/dev/null \
+      || fallos+=("disco raíz $raiz (se esperaba gp3, 20 GB, cifrado)")
+    jq -e '.tipo == "gp3" and .gb == 8 and .cifrado == true and .dev == "/dev/sdf" and .estado == "attached"' <<< "$sb" >/dev/null \
+      || fallos+=("Volumen_Sandbox $sb (se esperaba gp3, 8 GB, cifrado, /dev/sdf, attached)")
+    [ "$sin_cifrar" = "[]" ] || fallos+=("volúmenes sin cifrar adjuntos: $sin_cifrar")
+    [ "$n" -eq 2 ] || fallos+=("$n volúmenes adjuntos (se esperaban 2): $resumen")
+    if [ ${#fallos[@]} -eq 0 ]; then
+      estado="aprobado"; detalle="raíz $ROOT_VOLUME_ID gp3 20 GB cifrado; sandbox $SANDBOX_VOLUME_ID gp3 8 GB cifrado en /dev/sdf; 0 volúmenes sin cifrar"
+    else
+      estado="no_aprobado"; detalle="no conforme: $(printf '%s; ' "${fallos[@]}" | sed 's/; $//')"
+    fi
+  fi
+  jq -cn --arg c "$criterio" --arg r "$requisito" --arg e "$estado" --arg d "$detalle" \
+    '{criterio: $c, requisito: $r, estado: $e, detalle: $d}'
+)
+```
+
+Un volumen con `Encrypted=false` adjunto a la Instancia hace que la Instancia sea no conforme (R14.5). El cifrado de un volumen EBS no se puede activar en el sitio: se informa al Equipo, se desadjunta el volumen ajeno al stack o, si es uno de los dos del stack, se corrige la plantilla y se recrea con un change set revisado (con snapshot previo, sección 8).
+
+#### 3.6.2 Montaje del Volumen_Sandbox en un dispositivo propio (R4.6, R14.2)
+
+Se ejecuta dentro de la Instancia, en Session Manager, después de `bootstrap_host.sh` (tarea 6.1), que formatea y monta el volumen. Antes de pegar el bloque se define el ID del Volumen_Sandbox copiándolo de CloudShell (`echo $SANDBOX_VOLUME_ID`). En una t3.small (Nitro), el attachment `/dev/sdf` aparece como un dispositivo NVMe; se identifica por su enlace en `/dev/disk/by-id/`.
+
+Consulta directa:
+
+```bash
+df -h /srv/sandbox
+df -h /
+findmnt /srv/sandbox
+```
+
+Resultado esperado: `/srv/sandbox` en un dispositivo NVMe (p. ej. `/dev/nvme1n1`) de unos 8 GB, y `/` en otro (p. ej. `/dev/nvme0n1p1` o `/dev/root`) de unos 20 GB.
+
+Evaluación automática del criterio:
+
+```bash
+SANDBOX_VOLUME_ID=vol-xxxxxxxxxxxxxxxxx   # valor copiado de CloudShell
+(
+  criterio="CA-12"; requisito="R4.6, R14.2"
+  enlace="/dev/disk/by-id/nvme-Amazon_Elastic_Block_Store_${SANDBOX_VOLUME_ID//-/}"
+  disp=$(readlink -f "$enlace" 2>/dev/null)
+  mnt=$(findmnt -n -o SOURCE /srv/sandbox 2>/dev/null)
+  raiz=$(findmnt -n -o SOURCE / 2>/dev/null)
+  if [[ "$SANDBOX_VOLUME_ID" != vol-* ]] || [[ "$SANDBOX_VOLUME_ID" == *x* ]]; then
+    estado="no_verificable"; detalle="SANDBOX_VOLUME_ID no está definido con el valor real"
+  elif [ -z "$disp" ] || [ ! -b "$disp" ]; then
+    estado="no_aprobado"; detalle="no conforme: no se encontró el dispositivo del Volumen_Sandbox ($enlace)"
+  elif [ -z "$mnt" ]; then
+    estado="no_aprobado"; detalle="no conforme: /srv/sandbox no es un punto de montaje (¿se ejecutó bootstrap_host.sh?)"
+  elif [ "$(readlink -f "$mnt")" != "$disp" ]; then
+    estado="no_aprobado"; detalle="no conforme: /srv/sandbox está montado desde $mnt, no desde el Volumen_Sandbox ($disp)"
+  elif [ "$(readlink -f "$mnt")" = "$(readlink -f "$raiz")" ]; then
+    estado="no_aprobado"; detalle="no conforme: /srv/sandbox y / están en el mismo dispositivo ($mnt)"
+  else
+    estado="aprobado"
+    detalle="/srv/sandbox en $mnt (Volumen_Sandbox $SANDBOX_VOLUME_ID, $(df -h --output=size /srv/sandbox | tail -n1 | tr -d ' ')); / en $raiz"
+  fi
+  jq -cn --arg c "$criterio" --arg r "$requisito" --arg e "$estado" --arg d "$detalle" \
+    '{criterio: $c, requisito: $r, estado: $e, detalle: $d}'
+)
+```
+
+El resto de CA-12 (`SANDBOX_DATA_DIR`, `findmnt` por UUID tras reinicio, volumen ausente y prueba de llenado) se verifica en la sección 4 (tarea 6.1).
+
+#### 3.6.3 Reinicio: cifrado, montaje y protección (R14.3, R14.4, R16.2, modifica: reinicia la Instancia)
+
+> **Atención.** Este bloque reinicia la Instancia; la aplicación deja de responder uno o dos minutos. Se avisa al Equipo antes. Se ejecuta después de la tarea 6.1, para que `/srv/sandbox` esté en `/etc/fstab`.
+
+El reinicio equivale a `sudo reboot` dentro de la Instancia: el bloque usa `aws ec2 reboot-instances`, que reinicia el sistema operativo sin cambiar el estado EC2 (`running`). Para saber cuándo volvió, compara el `boot_id` del kernel antes y después, leído por Run Command con la función `ssm_run` de 3.2. Si se prefiere `sudo reboot` desde Session Manager, se lee el `boot_id` antes (`cat /proc/sys/kernel/random/boot_id`), se reinicia y se ejecuta el mismo bloque saltando el `reboot-instances`.
+
+```bash
+(
+  criterio="CA-20"; requisito="R14.3, R14.4, R16.2"
+  if [ -z "$INSTANCE_ID" ] || ! declare -F ssm_run >/dev/null; then
+    estado="no_verificable"; detalle="faltan INSTANCE_ID o ssm_run; ejecutar 3.2"
+  elif ! boot0=$(ssm_run 'cat /proc/sys/kernel/random/boot_id') || [ -z "$boot0" ]; then
+    estado="no_verificable"; detalle="no se pudo leer boot_id por Run Command antes del reinicio; revisar 3.4.3"
+  elif ! err=$(aws ec2 reboot-instances --instance-ids "$INSTANCE_ID" 2>&1); then
+    estado="no_verificable"; detalle="falló aws ec2 reboot-instances: $(echo "$err" | tr '\n' ' ')"
+  else
+    SECONDS=0; boot1=""; volvio=""
+    sleep 20
+    while [ "$SECONDS" -lt 300 ]; do
+      if boot1=$(ssm_run 'cat /proc/sys/kernel/random/boot_id' 2>/dev/null) \
+         && [ -n "$boot1" ] && [ "$boot1" != "$boot0" ]; then
+        volvio="si"; break
+      fi
+      sleep 10
+    done
+    seg=$SECONDS
+    st=$(aws ec2 describe-instances --instance-ids "$INSTANCE_ID" \
+      --query 'Reservations[0].Instances[0].State.Name' --output text 2>/dev/null)
+    if [ -z "$volvio" ] || [ "$seg" -gt 300 ]; then
+      estado="no_aprobado"
+      detalle="no conforme: la instancia no volvió en 300 s (estado EC2 ${st:-?}, ${seg} s); no se tocaron los volúmenes (R14.4)"
+    else
+      fallos=()
+      mnt=$(ssm_run 'findmnt -n -o SOURCE /srv/sandbox; findmnt -n -o SOURCE /' 2>/dev/null)
+      m_sb=$(sed -n 1p <<< "$mnt"); m_raiz=$(sed -n 2p <<< "$mnt")
+      cifr=$(aws ec2 describe-volumes --filters Name=attachment.instance-id,Values="$INSTANCE_ID" \
+        --query 'Volumes[].Encrypted' --output text 2>/dev/null)
+      prot=$(aws ec2 describe-instance-attribute --instance-id "$INSTANCE_ID" \
+        --attribute disableApiTermination --query 'DisableApiTermination.Value' --output text 2>/dev/null)
+      [ "$st" = "running" ] || fallos+=("estado EC2 $st (se esperaba running)")
+      { [ -n "$m_sb" ] && [ "$m_sb" != "$m_raiz" ]; } || fallos+=("/srv/sandbox no montado tras el reinicio (findmnt: ${m_sb:-vacío}) (R14.4)")
+      { [ -n "$cifr" ] && ! grep -qw False <<< "$cifr"; } || fallos+=("Encrypted tras el reinicio: ${cifr:-sin datos}")
+      [ "$prot" = "True" ] || fallos+=("disableApiTermination=${prot:-ausente} tras el reinicio (R16.2)")
+      if [ ${#fallos[@]} -eq 0 ]; then
+        estado="aprobado"
+        detalle="reinicio completado en ${seg} s; running; /srv/sandbox montado desde $m_sb (/ en $m_raiz); volúmenes cifrados; disableApiTermination=true"
+      else
+        estado="no_aprobado"; detalle="no conforme: $(printf '%s; ' "${fallos[@]}" | sed 's/; $//')"
+      fi
+    fi
+  fi
+  jq -cn --arg c "$criterio" --arg r "$requisito" --arg e "$estado" --arg d "$detalle" \
+    '{criterio: $c, requisito: $r, estado: $e, detalle: $d}'
+)
+```
+
+Resultado esperado: `aprobado`, normalmente con 40 a 120 s. Cada intento de `ssm_run` mientras la Instancia arranca puede tardar hasta unos 100 s en fallar, por eso el bloque puede terminar algo después de los 300 s; en ese caso el `detalle` lo indica y el criterio queda `no_aprobado`, y se repite una vez para descartar el retraso de Run Command.
+
+Ante `no_aprobado` (R14.4): R14.3 se da por fallido y los volúmenes **no se tocan**: no se desadjuntan, no se formatean, no se fuerza la detención (`stop-instances --force`) ni se termina la Instancia. Se diagnostica leyendo la salida de consola (`aws ec2 get-console-output --instance-id "$INSTANCE_ID" --latest --output text`) y, cuando la Instancia responda, `findmnt /srv/sandbox` y `/etc/fstab` en Session Manager. La entrada `nofail` de `/etc/fstab` (tarea 6.1) permite que el sistema arranque aunque el volumen falte. Se registra la causa en el `detalle` y se repite 3.6.3 tras corregirla.
+
+### 3.7 Etiquetas (T-13, T-14, T-15 · RF-06.6 · CA-21 · R17)
+
+Condiciones:
+
+| Condición | Requisito | Verificación |
+| --- | --- | --- |
+| La Instancia tiene `Project=PgGuardian`, `Env=prod` y `Owner` de 1 a 256 caracteres | R17.1 | 3.7.1 |
+| El disco raíz, el Volumen_Sandbox y la Elastic IP tienen las mismas tres etiquetas | R17.2 | 3.7.1 |
+| Un `Owner` vacío, ausente o de más de 256 caracteres se trata como no conforme y se corrige solo esa etiqueta | R17.3 | 3.7.1 |
+
+La plantilla asigna las etiquetas a la Instancia, al Volumen_Sandbox y a la Elastic IP, y el disco raíz las hereda al crearse (`PropagateTagsToVolumeOnCreation: true`).
+
+#### 3.7.1 Etiquetas de los cuatro recursos (R17.1, R17.2, R17.3)
+
+Consulta directa:
+
+```bash
+aws ec2 describe-tags \
+  --filters "Name=resource-id,Values=$INSTANCE_ID,$ROOT_VOLUME_ID,$SANDBOX_VOLUME_ID,$EIP_ALLOC_ID" \
+            "Name=key,Values=Project,Env,Owner" \
+  --query 'Tags[].[ResourceType,ResourceId,Key,Value]' --output table \
+  | tee "docs/aws/evidencia/instancia/tags-$FECHA.txt"
+```
+
+Resultado esperado: 12 filas, tres por recurso (`instance`, dos `volume` y `elastic-ip`), con `Project=PgGuardian`, `Env=prod` y el mismo `Owner`.
+
+Evaluación automática del criterio:
+
+```bash
+(
+  criterio="CA-21"; requisito="R17.1, R17.2, R17.3"
+  ids=("$INSTANCE_ID" "$ROOT_VOLUME_ID" "$SANDBOX_VOLUME_ID" "$EIP_ALLOC_ID")
+  nombres=("instancia" "disco raíz" "Volumen_Sandbox" "Elastic IP")
+  vacios=""
+  for i in 0 1 2 3; do { [ -z "${ids[$i]}" ] || [ "${ids[$i]}" = "None" ]; } && vacios="$vacios ${nombres[$i]}"; done
+  if [ -n "$vacios" ]; then
+    estado="no_verificable"; detalle="faltan identificadores:$vacios; ejecutar 3.2"
+  elif ! tags=$(aws ec2 describe-tags \
+       --filters "Name=resource-id,Values=$(IFS=,; echo "${ids[*]}")" --output json 2>&1); then
+    estado="no_verificable"; detalle="falló aws ec2 describe-tags: $(echo "$tags" | tr '\n' ' ')"
+  else
+    fallos=()
+    t() { jq -r --arg r "$1" --arg k "$2" '[.Tags[] | select(.ResourceId == $r and .Key == $k) | .Value][0] // ""' <<< "$tags"; }
+    for i in 0 1 2 3; do
+      r=${ids[$i]}; nom=${nombres[$i]}
+      p=$(t "$r" Project); e=$(t "$r" Env); o=$(t "$r" Owner)
+      [ "$p" = "PgGuardian" ] || fallos+=("$nom $r: Project=${p:-ausente}")
+      [ "$e" = "prod" ] || fallos+=("$nom $r: Env=${e:-ausente}")
+      if [ ${#o} -lt 1 ] || [ ${#o} -gt 256 ]; then
+        fallos+=("$nom $r: etiqueta Owner inválida (longitud ${#o}, se esperaba de 1 a 256)")
+      fi
+    done
+    if [ ${#fallos[@]} -eq 0 ]; then
+      estado="aprobado"; detalle="instancia, disco raíz, Volumen_Sandbox y Elastic IP con Project=PgGuardian, Env=prod y Owner=$(t "$INSTANCE_ID" Owner)"
+    else
+      estado="no_aprobado"; detalle="no conforme: $(printf '%s; ' "${fallos[@]}" | sed 's/; $//')"
+    fi
+  fi
+  jq -cn --arg c "$criterio" --arg r "$requisito" --arg e "$estado" --arg d "$detalle" \
+    '{criterio: $c, requisito: $r, estado: $e, detalle: $d}'
+)
+```
+
+Corrección ante `no_aprobado` (R17.3), cambiando solo la etiqueta:
+
+- Instancia, Volumen_Sandbox o Elastic IP: se cambia el parámetro `Owner` con un change set de actualización (2.3, `ParameterKey=Owner,ParameterValue=<valor>` y el resto con `UsePreviousValue=true`). Cambiar solo etiquetas no reemplaza recursos; si la tabla del change set muestra `Replacement=True`, no se ejecuta. No se usa `create-tags` sobre estos tres recursos, porque generaría *drift*.
+- Disco raíz: no es un recurso propio del stack y `PropagateTagsToVolumeOnCreation` solo actúa al crear la Instancia, así que un cambio posterior de `Owner` no le llega. Se corrige solo esa etiqueta con `aws ec2 create-tags --resources "$ROOT_VOLUME_ID" --tags Key=Owner,Value=<valor>` (y `Project`/`Env` si faltan).
+
+Después se repite 3.7.1.
+
+### 3.8 Elastic IP (T-15 · RF-06.8, RF-03.1 · CA-23 · R19.1)
+
+Condición: la IP pública de la Instancia es la Elastic IP del output `PublicIp`, que sigue asociada a la Instancia, antes y después de detener e iniciar la Instancia (R19.1). La recuperación completa de la aplicación tras encender (R19.8) se verifica en la sección 6.
+
+#### 3.8.1 Comprobación de la asociación (R19.1)
+
+Consulta directa:
+
+```bash
+aws ec2 describe-instances --instance-ids "$INSTANCE_ID" \
+  --query 'Reservations[0].Instances[0].[State.Name,PublicIpAddress]' --output text
+aws ec2 describe-addresses --public-ips "$PUBLIC_IP" \
+  --query 'Addresses[0].[PublicIp,AllocationId,AssociationId,InstanceId]' --output text
+```
+
+Resultado esperado: `running <PublicIp>` y, en la segunda línea, la misma IP con `eipalloc-...`, `eipassoc-...` y el `InstanceId` del stack.
+
+Evaluación automática del criterio. `MOMENTO` vale `antes` o `despues` según se ejecute antes o después de 3.8.2:
+
+```bash
+MOMENTO=antes   # en 3.8.2 se vuelve a ejecutar con MOMENTO=despues
+(
+  criterio="CA-23"; requisito="R19.1 ($MOMENTO de detener e iniciar)"
+  if [ -z "$INSTANCE_ID" ] || [ -z "$PUBLIC_IP" ]; then
+    estado="no_verificable"; detalle="faltan INSTANCE_ID o PUBLIC_IP; ejecutar 3.2"
+  elif ! inst=$(aws ec2 describe-instances --instance-ids "$INSTANCE_ID" \
+       --query 'Reservations[0].Instances[0].[State.Name,PublicIpAddress]' --output text 2>&1); then
+    estado="no_verificable"; detalle="falló aws ec2 describe-instances: $(echo "$inst" | tr '\n' ' ')"
+  elif ! addr=$(aws ec2 describe-addresses --public-ips "$PUBLIC_IP" \
+       --query 'Addresses[0].[InstanceId,AllocationId]' --output text 2>&1); then
+    estado="no_verificable"; detalle="falló aws ec2 describe-addresses (¿se liberó la Elastic IP?): $(echo "$addr" | tr '\n' ' ')"
+  else
+    read -r st ip <<< "$inst"; read -r asoc alloc <<< "$addr"
+    fallos=()
+    [ "$st" = "running" ] || fallos+=("estado $st (se esperaba running)")
+    [ "$ip" = "$PUBLIC_IP" ] || fallos+=("IP pública de la instancia ${ip:-ninguna} distinta de PublicIp $PUBLIC_IP")
+    [ "$asoc" = "$INSTANCE_ID" ] || fallos+=("la Elastic IP $PUBLIC_IP está asociada a ${asoc:-ninguna instancia}")
+    if [ ${#fallos[@]} -eq 0 ]; then
+      estado="aprobado"; detalle="$INSTANCE_ID running con IP pública $PUBLIC_IP = Elastic IP $alloc asociada a la instancia"
+    else
+      estado="no_aprobado"; detalle="no conforme: $(printf '%s; ' "${fallos[@]}" | sed 's/; $//')"
+    fi
+  fi
+  jq -cn --arg c "$criterio" --arg r "$requisito" --arg e "$estado" --arg d "$detalle" \
+    '{criterio: $c, requisito: $r, estado: $e, detalle: $d}'
+)
+```
+
+#### 3.8.2 Detener e iniciar (R19.1, modifica: detiene la Instancia)
+
+> **Atención.** La aplicación no responde mientras la Instancia está detenida (unos 2 a 4 minutos). Se avisa al Equipo antes. No se usa `--force`.
+
+```bash
+aws ec2 stop-instances --instance-ids "$INSTANCE_ID"
+aws ec2 wait instance-stopped --instance-ids "$INSTANCE_ID"
+aws ec2 describe-addresses --public-ips "$PUBLIC_IP" --query 'Addresses[0].InstanceId' --output text
+aws ec2 start-instances --instance-ids "$INSTANCE_ID"
+aws ec2 wait instance-running --instance-ids "$INSTANCE_ID"
+```
+
+Resultado esperado: con la Instancia detenida, la tercera línea sigue mostrando el `InstanceId` (la Elastic IP no se desasocia al detener). Después de `instance-running` se repite 3.8.1 con `MOMENTO=despues` y, como la Instancia acaba de pasar a `running`, también 3.4.3 (R10.3). R19.1 queda aprobado solo con las líneas `antes` y `despues` en `aprobado`. Si la IP cambia, se revisa que la Elastic IP no se haya liberado ni desasociado (`describe-addresses`) y se restablece la asociación con un change set del stack, no a mano.
+
+### 3.9 Resumen de la sección 3
+
+| Criterio | Bloques de esta sección que deben estar en `aprobado` | Partes que se verifican en otras secciones |
+| --- | --- | --- |
+| CA-12 | 3.6.2 | `SANDBOX_DATA_DIR`, `findmnt` por UUID tras reinicio, volumen ausente y llenado (sección 4) |
+| CA-17 | 3.1.1, 3.1.2, 3.1.3, 3.4.3 (y su repetición en 3.5.2 y 3.8.2) | Sesión de Session Manager y evento `StartSession` (tarea 6.1) |
+| CA-18 | 3.3.1, 3.3.2, 3.3.3 | `KeyName` vacío y acceso sin SSH (tarea 6.1) |
+| CA-19 | 3.4.1, 3.5.1, 3.5.2 | — |
+| CA-20 | 3.4.2, 3.6.1, 3.6.3 | Swap (sección 4) |
+| CA-21 | 3.7.1 | — |
+| CA-23 | 3.8.1 (`antes` y `despues`) | Certificado, redirección y HTTPS (sección 5); aplicación tras encender (sección 6) |
+
+Un criterio nunca se da por aprobado con un bloque en `no_aprobado` o `no_verificable`: se corrige la causa y se repite el bloque, conservando la línea anterior en la evidencia.
 
 ## 4. Host
 

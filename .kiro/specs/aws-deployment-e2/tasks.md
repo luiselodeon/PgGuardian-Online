@@ -123,7 +123,7 @@ Lenguajes: Python (FastAPI, unittest), JavaScript (React/Vite), YAML (Compose y 
     - Añadir a la sección instancia de `docs/aws/runbook.md` el comando `aws iam list-attached-role-policies --role-name PgGuardian-EC2-Role` (debe listar `AmazonSSMManagedInstanceCore`) y la comprobación de que la instancia usa ese perfil (`aws ec2 describe-instances`, campo `IamInstanceProfile`), con el resultado esperado.
     - _RF-05.4 · CA-17 · Requirements: 10.1, 10.2_
 
-- [ ] 5. Fase 3: stack de CloudFormation `pgguardian` (recursos de T-11 a T-15 y T-19 a T-21)
+- [x] 5. Fase 3: stack de CloudFormation `pgguardian` (recursos de T-11 a T-15 y T-19 a T-21)
   - [x] 5.1 Escribir `infra/cloudformation/pgguardian.yaml` y validarlo con `cfn-lint`
     - Recursos según C15, en un solo stack:
       - T-11: rol `PgGuardian-EC2-Role` con `AmazonSSMManagedInstanceCore` y su perfil de instancia.
@@ -148,7 +148,7 @@ Lenguajes: Python (FastAPI, unittest), JavaScript (React/Vite), YAML (Compose y 
     - Plan B de Cost Anomaly Detection: si el despliegue falla en `CostAnomalyMonitor` o `CostAnomalySubscription`, quitar ambos recursos de la plantilla, volver a desplegar el stack y crearlos con `scripts/aws/create_anomaly_detection.sh` (tarea 7.2). Si el rollback queda en `ROLLBACK_FAILED` porque `DisableApiTermination` impide terminar la instancia, obtener su ID con `describe-stack-resources`, ejecutar `aws ec2 modify-instance-attribute --no-disable-api-termination` y borrar el stack antes de repetir.
     - _Requirements: 21.1, 29.2, 29.3, 29.6, 29.7, 29.8, 29.10_
 
-  - [ ] 5.3 Runbook: verificaciones de instancia, volúmenes, Security Group, IMDS, etiquetas y Elastic IP
+  - [x] 5.3 Runbook: verificaciones de instancia, volúmenes, Security Group, IMDS, etiquetas y Elastic IP
     - Añadir a la sección instancia de `docs/aws/runbook.md`, con los outputs `InstanceId`, `PublicIp` y `SandboxVolumeId`, las verificaciones que antes estaban en las tareas de T-12 a T-15:
       - Security Group: `describe-security-groups` (2 reglas, 0 para el puerto 22 e `::/0`) y `nmap -Pn -p- <PublicIp>` (solo 80/443 abiertos).
       - Instancia: metadatos (`HttpTokens=required`, `HttpEndpoint=enabled`, `HttpPutResponseHopLimit=1`), cifrado, protección contra terminación (`terminate-instances` rechazado) y SSM `Online` en 300 s (`ssm describe-instance-information`).
@@ -158,7 +158,7 @@ Lenguajes: Python (FastAPI, unittest), JavaScript (React/Vite), YAML (Compose y 
       - Elastic IP: la IP pública de la instancia coincide con `PublicIp` antes y después de detener e iniciar la instancia.
     - _RF-04.4, RF-05.4, RF-05.5, RF-06.1, RF-06.2, RF-06.3, RF-06.5, RF-06.6, RF-06.8 · CA-12, CA-17 a CA-21, CA-23 · Requirements: 4.6, 10.2, 10.3, 10.4, 11.1, 11.2, 12.1, 12.2, 12.3, 12.4, 13.1, 13.2, 13.3, 13.4, 13.5, 14.1, 14.2, 14.3, 14.4, 14.5, 16.1, 16.2, 16.3, 16.4, 17.1, 17.2, 17.3, 19.1_
 
-  - [ ] 5.4 Runbook: borrado del stack
+  - [x] 5.4 Runbook: borrado del stack
     - Añadir a la sección stack de `docs/aws/runbook.md` el procedimiento de C15, en este orden: `aws cloudformation update-termination-protection --no-enable-termination-protection --stack-name pgguardian`; `aws ec2 modify-instance-attribute --instance-id <InstanceId> --no-disable-api-termination`; un snapshot del disco raíz y uno del Volumen_Sandbox con `scripts/aws/manual_snapshot.sh` (tarea 7.4), ambos en `completed`; `aws cloudformation delete-stack --stack-name pgguardian` y `aws cloudformation wait stack-delete-complete --stack-name pgguardian`.
     - Indicar que el borrado elimina la instancia, los dos discos, la Elastic IP, el rol, el Security Group, el presupuesto, la alarma y las anomalías, y que los snapshots se conservan porque no pertenecen al stack. Anotar también que, al borrar el stack, la cuenta queda sin monitor de anomalías (el por defecto se borró en la comprobación previa de la tarea 5.2) y que, si la cuenta sigue en uso, se puede volver a crear uno de servicios desde la consola de Cost Anomaly Detection.
     - _Requirements: 23.3, 29.8, 29.9_
