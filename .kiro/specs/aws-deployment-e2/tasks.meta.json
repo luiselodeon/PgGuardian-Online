@@ -254,6 +254,18 @@
         "chatSessionId": "sess_ea901540-269b-497c-bff9-2b27f4e206ca",
         "timestamp": 1795668875229
       }
+    ],
+    "6.1 T-16: Script `scripts/aws/bootstrap_host.sh` (idempotente)": [
+      {
+        "executionId": "5a575d6d-057e-469e-8c0f-91266eb5ea94",
+        "chatSessionId": "sess_b93b78ff-12bb-421b-9511-a2a2f3fb2805",
+        "timestamp": 1795706407543
+      },
+      {
+        "executionId": "5a575d6d-057e-469e-8c0f-91266eb5ea94",
+        "chatSessionId": "sess_b93b78ff-12bb-421b-9511-a2a2f3fb2805",
+        "timestamp": 1795715308269
+      }
     ]
   }
 }

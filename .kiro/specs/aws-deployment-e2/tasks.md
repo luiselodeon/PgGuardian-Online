@@ -164,7 +164,7 @@ Lenguajes: Python (FastAPI, unittest), JavaScript (React/Vite), YAML (Compose y 
     - _Requirements: 23.3, 29.8, 29.9_
 
 - [ ] 6. Fase 4: host y despliegue (T-16 a T-18)
-  - [ ] 6.1 T-16: Script `scripts/aws/bootstrap_host.sh` (idempotente)
+  - [x] 6.1 T-16: Script `scripts/aws/bootstrap_host.sh` (idempotente)
     - Recibe como argumento el output `SandboxVolumeId` y localiza el dispositivo NVMe en `/dev/disk/by-id/nvme-Amazon_Elastic_Block_Store_vol<id sin guion>`, no en `/dev/sdf`. La plantilla no lleva `UserData`, así que el script se ejecuta por Session Manager.
     - Formateo con `mkfs.ext4` solo si falta sistema de archivos, entrada `/etc/fstab` por UUID con `nofail` y montaje.
     - Ejecutar `mkdir -p /srv/sandbox/pgdata` y `chown 999:999 /srv/sandbox/pgdata` solo después de comprobar con `findmnt /srv/sandbox` que es un punto de montaje del Volumen_Sandbox. Si la comprobación falla, abortar el bootstrap sin crear el directorio: uno creado antes del montaje quedaría en el disco raíz y `create_host_path: false` no protegería nada.
@@ -172,6 +172,8 @@ Lenguajes: Python (FastAPI, unittest), JavaScript (React/Vite), YAML (Compose y 
     - Añadir a la sección host de `docs/aws/runbook.md` los comandos de verificación: `swapon --show` (también tras 3 reinicios), `findmnt /srv/sandbox`, `systemctl is-active/is-enabled unattended-upgrades` y contenido de `20auto-upgrades`; `SANDBOX_DATA_DIR=/srv/sandbox/pgdata` en el `.env` del servidor y `/srv/sandbox/pgdata` en el dispositivo del Volumen_Sandbox y no en el de `/` (`df`); y la prueba de llenado con `generate_series` (login e historial ≤ 3 s, `/` varía ≤ 1 pp).
     - Añadir a la sección host la prueba manual de volumen ausente: reiniciar la instancia sin el Volumen_Sandbox adjunto y confirmar que el sistema arranca (`nofail`), que `sandbox_db` no arranca y que `/srv/sandbox/pgdata` no existe en el disco raíz (`ls` falla; `df /srv/sandbox` muestra el dispositivo raíz).
     - Añadir a la sección instancia la verificación del acceso sin SSH: `aws ec2 describe-instances` con `KeyName` vacío o ausente, `aws ec2 describe-security-groups` sin ninguna regla de entrada TCP/22, y una sesión de Session Manager con el evento `StartSession` en CloudTrail (`lookup-events`, hasta 15 min).
+    - Idempotente: una segunda ejecución no formatea el disco, no duplica entradas en `/etc/fstab` ni crea un segundo swap. Antes de `mkfs.ext4`, comprobar con `blkid` que el dispositivo no tiene sistema de archivos. Si el enlace `/dev/disk/by-id/...` no existe, abortar sin modificar nada. Usar `set -euo pipefail` y un mensaje por paso. Validar con `bash -n` y `shellcheck`.
+    - En la sección host del runbook: entrar con `sudo -iu ubuntu bash` (Session Manager abre `sh`); llevar el script a la instancia con un heredoc (`cat > ~/bootstrap_host.sh <<'EOF' … EOF`, funciona con el repo privado) o con `curl` del archivo raw si el repo es público; ejecutar con `sudo bash ~/bootstrap_host.sh <SandboxVolumeId>`.
     - _RF-04.4, RF-05.5, RF-06.3, RF-06.4, RF-06.7 · CA-12, CA-17, CA-18, CA-20, CA-22 · Requirements: 4.5, 4.6, 4.7, 4.8, 4.9, 4.10, 11.1, 11.3, 11.4, 11.5, 15.1, 15.2, 15.3, 15.4, 18.1, 18.2, 18.3, 18.4, 18.5, 19.8_
 
   - [ ] 6.2 T-17: Plantilla `.env` de producción y generación de secretos

@@ -1276,8 +1276,6 @@ La sección 2.5 queda completa cuando 2.5.3, 2.5.4 y 2.5.6 están en `aprobado`.
 
 ## 3. Instancia
 
-Pendiente: tarea 6.1 (acceso sin SSH: `KeyName`, puerto 22 y evento `StartSession` en CloudTrail).
-
 ### 3.1 Rol `PgGuardian-EC2-Role` y perfil de instancia (T-11 · RF-05.4 · CA-17 · R10.1, R10.2)
 
 Condiciones que deben cumplir el Rol_EC2 y la Instancia:
@@ -1488,6 +1486,8 @@ Orden y momento de cada verificación:
 | 3.6.3 | CloudShell | Tras la tarea 6.1 | Sí: reinicia la Instancia |
 | 3.3.2 | CloudShell | Tras el despliegue (sección 5): sin Caddy escuchando, 80 y 443 aparecen `closed` y no `open` | No |
 | 3.8.2 | CloudShell | Cuando el Equipo acepte una caída de unos minutos | Sí: detiene e inicia la Instancia |
+| 3.9.1 | CloudShell | Tras 2.2 | No |
+| 3.9.2, 3.9.3 | Consola (Session Manager) y CloudShell | Tras 2.2 | No (abre y cierra una sesión) |
 
 ### 3.3 Security Group (T-12 · RF-06.1 · CA-18 · R11.1, R12)
 
@@ -1632,7 +1632,7 @@ Prueba con los puertos de SSH, PostgreSQL, la API interna y RDP. Cada intento es
 )
 ```
 
-Resultado esperado: `aprobado`; cada intento termina por tiempo agotado (el Security Group descarta el paquete). La parte de R11.5 (SSH) se documenta además en la verificación de acceso sin SSH de la tarea 6.1.
+Resultado esperado: `aprobado`; cada intento termina por tiempo agotado (el Security Group descarta el paquete). El intento al puerto 22 es la verificación de R11.5; el resto del acceso sin SSH está en 3.9.
 
 Cómo se interpreta 3.3:
 
@@ -2184,13 +2184,153 @@ aws ec2 wait instance-running --instance-ids "$INSTANCE_ID"
 
 Resultado esperado: con la Instancia detenida, la tercera línea sigue mostrando el `InstanceId` (la Elastic IP no se desasocia al detener). Después de `instance-running` se repite 3.8.1 con `MOMENTO=despues` y, como la Instancia acaba de pasar a `running`, también 3.4.3 (R10.3). R19.1 queda aprobado solo con las líneas `antes` y `despues` en `aprobado`. Si la IP cambia, se revisa que la Elastic IP no se haya liberado ni desasociado (`describe-addresses`) y se restablece la asociación con un change set del stack, no a mano.
 
-### 3.9 Resumen de la sección 3
+### 3.9 Acceso sin SSH y Session Manager (T-16 · RF-05.5 · CA-17, CA-18 · R11)
+
+Condiciones:
+
+| Condición | Requisito | Verificación |
+| --- | --- | --- |
+| La Instancia no tiene par de llaves: `KeyName` vacío o ausente en `describe-instances` | R11.2, R11.4 | 3.9.1 |
+| El Security Group no tiene ninguna regla de entrada que cubra TCP/22 (ni IPv4, ni IPv6, ni otro origen) | R11.1, R11.4 | 3.9.1 (y 3.3.1) |
+| Un intento de SSH al puerto 22 no establece sesión | R11.5 | 3.3.3 (puerto 22) |
+| Un Usuario_IAM abre una consola interactiva por Session Manager en ≤ 30 s | R11.3 | 3.9.2 |
+| CloudTrail registra `StartSession` con ese Usuario_IAM y la Instancia en ≤ 15 min | R11.3 | 3.9.3 |
+
+No hay llave `.pem` que repartir ni puerto 22 que abrir: toda la administración de la Instancia (secciones 4 y 5) pasa por Session Manager. Si alguna verificación da `no_aprobado`, la corrección va en la plantilla y se aplica con un change set (2.3).
+
+#### 3.9.1 Sin par de llaves y sin TCP/22 (R11.1, R11.2, R11.4)
+
+Consulta directa:
+
+```bash
+aws ec2 describe-instances --instance-ids "$INSTANCE_ID" \
+  --query 'Reservations[0].Instances[0].KeyName' --output text
+aws ec2 describe-security-groups --group-ids "$SG_ID" \
+  --query 'SecurityGroups[0].IpPermissions[].[IpProtocol,FromPort,ToPort]' --output text
+```
+
+Resultado esperado: el primer comando imprime `None` (el campo `KeyName` no existe); el segundo, solo `tcp 80 80` y `tcp 443 443`.
+
+Evaluación automática del criterio:
+
+```bash
+(
+  criterio="CA-18"; requisito="R11.1, R11.2, R11.4"
+  if [ -z "$INSTANCE_ID" ] || [ -z "$SG_ID" ] || [ "$SG_ID" = "None" ]; then
+    estado="no_verificable"; detalle="faltan INSTANCE_ID o SG_ID; ejecutar 3.2"
+  elif ! inst=$(aws ec2 describe-instances --instance-ids "$INSTANCE_ID" --output json 2>&1); then
+    estado="no_verificable"; detalle="falló aws ec2 describe-instances: $(echo "$inst" | tr '\n' ' ')"
+  elif ! sg=$(aws ec2 describe-security-groups --group-ids "$SG_ID" --output json 2>&1); then
+    estado="no_verificable"; detalle="falló aws ec2 describe-security-groups: $(echo "$sg" | tr '\n' ' ')"
+  else
+    llave=$(jq -r '.Reservations[0].Instances[0].KeyName // ""' <<< "$inst")
+    p22=$(jq -c '[.SecurityGroups[0].IpPermissions[]
+                  | select(.IpProtocol == "-1" or ((.IpProtocol == "tcp" or .IpProtocol == "6")
+                           and .FromPort <= 22 and .ToPort >= 22))]' <<< "$sg")
+    fallos=()
+    [ -z "$llave" ] || fallos+=("la instancia tiene el par de llaves '$llave'")
+    [ "$p22" = "[]" ] || fallos+=("reglas de entrada que cubren TCP/22: $p22")
+    if [ ${#fallos[@]} -eq 0 ]; then
+      estado="aprobado"; detalle="$INSTANCE_ID sin KeyName; $SG_ID sin reglas de entrada para TCP/22"
+    else
+      estado="no_aprobado"; detalle="no conforme: $(printf '%s; ' "${fallos[@]}" | sed 's/; $//')"
+    fi
+  fi
+  jq -cn --arg c "$criterio" --arg r "$requisito" --arg e "$estado" --arg d "$detalle" \
+    '{criterio: $c, requisito: $r, estado: $e, detalle: $d}'
+)
+```
+
+El par de llaves no se puede quitar de una instancia existente. Si apareciera un `KeyName`, se revisa la plantilla (la propiedad `KeyName` no debe existir en `Instance`); el cambio reemplaza la Instancia, así que se decide con el Equipo y se toma antes un snapshot de ambos discos (sección 8).
+
+#### 3.9.2 Sesión de Session Manager (R11.3, paso manual)
+
+Lo hace un Usuario_IAM de `PgG-Admins` con MFA. Antes de abrir la sesión, en CloudShell se guarda la hora de inicio y el ARN del usuario, que usa 3.9.3:
+
+```bash
+INICIO_SESION=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+USUARIO_ARN=$(aws sts get-caller-identity --query Arn --output text)
+echo "inicio=$INICIO_SESION usuario=$USUARIO_ARN instancia=$INSTANCE_ID"
+```
+
+1. En la consola, abrir **EC2** → **Instances**, seleccionar la Instancia (`InstanceId` del stack) → **Connect** → pestaña **Session Manager** → **Connect**. También sirve **Systems Manager** → **Session Manager** → **Start session**.
+2. Medir con un cronómetro desde el clic en **Connect** hasta que aparece el prompt (`$`). Debe ser ≤ 30 s.
+3. Session Manager abre `sh` como `ssm-user`. Para trabajar como en el resto del runbook:
+
+   ```sh
+   sudo -iu ubuntu bash
+   whoami; hostname; cat /proc/sys/kernel/random/boot_id
+   ```
+
+4. Guardar una captura con la URL de la consola, el `InstanceId` y la salida de `whoami` (`ubuntu`). Cerrar la sesión con **Terminate**.
+
+Línea de resultado (a mano):
+
+```json
+{"criterio":"CA-17","requisito":"R11.3","estado":"aprobado","detalle":"<usuario> abrió Session Manager en <i-...> en <n> s (≤ 30 s); captura <archivo>"}
+```
+
+Si tarda más de 30 s o no abre, se anota `no_aprobado` y se revisa 3.4.3 (la Instancia debe estar `Online` en Systems Manager).
+
+#### 3.9.3 Evento `StartSession` en CloudTrail (R11.3)
+
+CloudTrail registra `StartSession` sin configuración adicional, con hasta 15 minutos de retraso. El bloque consulta cada 60 s durante 15 min como máximo; usa `INICIO_SESION` y `USUARIO_ARN` de 3.9.2 (misma sesión de CloudShell):
+
+```bash
+(
+  criterio="CA-17"; requisito="R11.3"
+  if [ -z "$INSTANCE_ID" ] || [ -z "$INICIO_SESION" ] || [ -z "$USUARIO_ARN" ]; then
+    estado="no_verificable"; detalle="faltan INSTANCE_ID, INICIO_SESION o USUARIO_ARN; ejecutar 3.2 y 3.9.2"
+  else
+    estado=""; evento=""; SECONDS=0
+    while [ "$SECONDS" -le 900 ]; do
+      if ! ev=$(aws cloudtrail lookup-events --region us-east-2 \
+           --lookup-attributes AttributeKey=EventName,AttributeValue=StartSession \
+           --start-time "$INICIO_SESION" --output json 2>&1); then
+        estado="no_verificable"; detalle="falló aws cloudtrail lookup-events: $(echo "$ev" | tr '\n' ' ')"
+        break
+      fi
+      evento=$(jq -c --arg i "$INSTANCE_ID" --arg u "$USUARIO_ARN" '
+        [.Events[] | .CloudTrailEvent | fromjson
+         | select(.requestParameters.target == $i and .userIdentity.arn == $u)
+         | {hora: .eventTime, usuario: .userIdentity.arn, instancia: .requestParameters.target,
+            sesion: (.responseElements.sessionId // "")}] | first // empty' <<< "$ev")
+      [ -n "$evento" ] && break
+      sleep 60
+    done
+    if [ -z "$estado" ]; then
+      if [ -n "$evento" ]; then
+        estado="aprobado"; detalle="StartSession en CloudTrail tras ${SECONDS} s de consulta: $evento"
+      else
+        estado="no_aprobado"
+        detalle="no conforme: ningún StartSession de $USUARIO_ARN hacia $INSTANCE_ID desde $INICIO_SESION en 15 min"
+      fi
+    fi
+  fi
+  jq -cn --arg c "$criterio" --arg r "$requisito" --arg e "$estado" --arg d "$detalle" \
+    '{criterio: $c, requisito: $r, estado: $e, detalle: $d}'
+)
+```
+
+Resultado esperado: `aprobado`, con la hora del evento, el ARN del Usuario_IAM, el `InstanceId` y el ID de la sesión. El `detalle` cuenta el tiempo de consulta, no el retraso real de CloudTrail; el criterio exige que el evento aparezca en ≤ 15 min.
+
+Cómo se interpreta 3.9:
+
+| Salida | `estado` | Requisito |
+| --- | --- | --- |
+| Sin `KeyName` y sin reglas para TCP/22 | `aprobado` | R11.1, R11.2, R11.4 |
+| Sesión abierta en ≤ 30 s | `aprobado` | R11.3 |
+| Evento `StartSession` del usuario hacia la Instancia en ≤ 15 min | `aprobado` | R11.3 |
+| Par de llaves presente, regla para TCP/22, sesión en más de 30 s o sin evento en 15 min | `no_aprobado` | R11 |
+| Falta una variable o falla la CLI | `no_verificable` | — |
+
+### 3.10 Resumen de la sección 3
 
 | Criterio | Bloques de esta sección que deben estar en `aprobado` | Partes que se verifican en otras secciones |
 | --- | --- | --- |
 | CA-12 | 3.6.2 | `SANDBOX_DATA_DIR`, `findmnt` por UUID tras reinicio, volumen ausente y llenado (sección 4) |
-| CA-17 | 3.1.1, 3.1.2, 3.1.3, 3.4.3 (y su repetición en 3.5.2 y 3.8.2) | Sesión de Session Manager y evento `StartSession` (tarea 6.1) |
-| CA-18 | 3.3.1, 3.3.2, 3.3.3 | `KeyName` vacío y acceso sin SSH (tarea 6.1) |
+| CA-17 | 3.1.1, 3.1.2, 3.1.3, 3.4.3 (y su repetición en 3.5.2 y 3.8.2), 3.9.2, 3.9.3 | — |
+| CA-18 | 3.3.1, 3.3.2, 3.3.3, 3.9.1 | — |
 | CA-19 | 3.4.1, 3.5.1, 3.5.2 | — |
 | CA-20 | 3.4.2, 3.6.1, 3.6.3 | Swap (sección 4) |
 | CA-21 | 3.7.1 | — |
@@ -2200,7 +2340,574 @@ Un criterio nunca se da por aprobado con un bloque en `no_aprobado` o `no_verifi
 
 ## 4. Host
 
-Pendiente: tarea 6.1 (swap, montaje del Volumen_Sandbox, parches automáticos, prueba de llenado y prueba de volumen ausente).
+Trazabilidad: componente C9 del diseño · T-16 · RF-04.4, RF-06.3, RF-06.4, RF-06.7 · CA-12, CA-20, CA-22 · R4.2, R4.4 a R4.10, R15, R18 y R19.8.
+
+La plantilla no lleva `UserData`. El host se configura a mano con `scripts/aws/bootstrap_host.sh`, ejecutado por Session Manager. El script es idempotente: se puede repetir sin formatear el disco, sin duplicar entradas en `/etc/fstab` y sin crear un segundo swap.
+
+Condiciones:
+
+| Condición | Requisito | Verificación |
+| --- | --- | --- |
+| Volumen_Sandbox con ext4, montado en `/srv/sandbox` por UUID desde `/etc/fstab` con `nofail`, también tras reiniciar | R4.5, R4.7 | 4.3 |
+| `/srv/sandbox/pgdata` existe, es de `999:999` y está en el Volumen_Sandbox (no en `/`); `lost+found` queda en `/srv/sandbox` | R4.2, R4.9 | 4.3, 4.4 |
+| `SANDBOX_DATA_DIR=/srv/sandbox/pgdata` en el `.env` del servidor y `sandbox_db` montado desde esa ruta | R4.4 | 4.4 |
+| Exactamente un swap de 2 GiB (±1 MiB), activo sin intervención tras 3 reinicios | R15.1 a R15.3 | 4.5, 4.6 |
+| `unattended-upgrades` instalado, `active` y `enabled`, solo con el origen `-security`, y `20auto-upgrades` con `"1"` y `"1"` | R18.1 a R18.4 | 4.7.1 |
+| Servicio `docker` habilitado al arranque | R19.8 | 4.7.2 |
+| Con el Volumen_Sandbox lleno al 100 %, login e historial responden en ≤ 3 s y `/` varía ≤ 1 punto porcentual | R4.10 | 4.8 |
+| Sin el Volumen_Sandbox, el SO arranca, `sandbox_db` no arranca y `/srv/sandbox/pgdata` no aparece en el disco raíz | R4.8 | 4.9 |
+
+Orden y momento:
+
+| Bloque | Dónde | Cuándo | Modifica algo |
+| --- | --- | --- | --- |
+| 4.1, 4.2 | Instancia (Session Manager) | Tras 2.2 y 3.9 | Sí: configura el host |
+| 4.3, 4.5, 4.7 | Instancia (Session Manager) | Tras 4.1; 4.3 se repite tras el reinicio de 3.6.3 | No |
+| 4.6 | CloudShell | Tras 4.1 | Sí: reinicia la Instancia 3 veces |
+| 4.4 | Instancia (Session Manager) | Tras `make_env.sh` (tarea 6.2) y el despliegue (sección 5) | No |
+| 4.8 | Instancia (Session Manager) | Tras el despliegue (sección 5) | Sí: llena y vacía el Volumen_Sandbox |
+| 4.9 | CloudShell e Instancia | Tras 4.8, cuando el Equipo acepte una caída de unos minutos | Sí: detiene la Instancia y desadjunta y vuelve a adjuntar el Volumen_Sandbox |
+
+Las líneas «Resultado de verificación» de esta sección se guardan en `docs/aws/evidencia/host/verificacion-host.jsonl`. Los bloques que corren en la Instancia se copian de la sesión de Session Manager a ese archivo. Los bloques de la Instancia usan `jq`, que instala `bootstrap_host.sh`.
+
+### 4.1 Ejecución de `bootstrap_host.sh` (T-16, modifica: configura el host)
+
+1. En CloudShell, leer el ID del Volumen_Sandbox (output `SandboxVolumeId`, 2.2):
+
+   ```bash
+   aws cloudformation describe-stacks --stack-name pgguardian \
+     --query "Stacks[0].Outputs[?OutputKey=='SandboxVolumeId'].OutputValue" --output text
+   ```
+
+2. Abrir una sesión de Session Manager hacia la Instancia (3.9.2). Session Manager abre `sh` como `ssm-user`; se cambia a `ubuntu` con bash:
+
+   ```sh
+   sudo -iu ubuntu bash
+   ```
+
+3. Llevar el script a la Instancia, de una de estas dos formas:
+
+   - **Heredoc** (funciona con el repositorio privado). Abrir `scripts/aws/bootstrap_host.sh` en el equipo, copiar su contenido completo y pegarlo entre las dos líneas siguientes. El delimitador va entre comillas (`'EOF'`) para que bash no expanda `$` ni comillas del script:
+
+     ```bash
+     cat > ~/bootstrap_host.sh <<'EOF'
+     # ... contenido completo de scripts/aws/bootstrap_host.sh ...
+     EOF
+     ```
+
+   - **`curl` del archivo raw** (solo si el repositorio es público):
+
+     ```bash
+     curl -fsSL -o ~/bootstrap_host.sh \
+       https://raw.githubusercontent.com/<usuario>/<repositorio>/<rama>/scripts/aws/bootstrap_host.sh
+     ```
+
+   Comprobar que llegó completo: `bash -n ~/bootstrap_host.sh` no imprime nada y `tail -n1 ~/bootstrap_host.sh` muestra la línea `printf '\nbootstrap_host.sh terminó sin errores.\n'`.
+
+4. Ejecutarlo con el ID del paso 1:
+
+   ```bash
+   sudo bash ~/bootstrap_host.sh <SandboxVolumeId>
+   ```
+
+Resultado esperado: ocho pasos `==> [1]` a `==> [8]` y, al final, `bootstrap_host.sh terminó sin errores.` El resumen muestra `/srv/sandbox` montado desde un `/dev/nvme1n1` (o similar) con su UUID, `pgdata 999:999 700`, `swap: /swapfile 2147479552` (2 GiB menos la página de cabecera), `unattended-upgrades active/enabled` y `docker active/enabled`. Se guarda la salida completa en `docs/aws/evidencia/host/bootstrap-<fecha>.txt`.
+
+Si el script se detiene con `ERROR:`, el mensaje indica la causa y el estado:
+
+| Mensaje | Qué pasó | Qué hacer |
+| --- | --- | --- |
+| `no existe /dev/disk/by-id/nvme-Amazon_Elastic_Block_Store_vol...` | El volumen no está adjunto o el ID no es el del output. No se modificó nada. | Revisar el ID con el paso 1 y 3.6.1. |
+| `tiene un sistema de archivos <tipo> (se esperaba ext4)` | El volumen tiene otro sistema de archivos; el script no lo formatea. | Revisar a mano con el Equipo; nunca formatear sin snapshot (sección 8). |
+| `/etc/fstab ya monta /srv/sandbox desde otro origen` o `varias entradas` | Hay una entrada previa que no coincide con el UUID del volumen. | Corregir `/etc/fstab` (hay copia `/etc/fstab.bak-bootstrap-*` si el script lo modificó) y repetir. |
+| `no está montado y contiene archivos en el disco raíz` | Alguien creó archivos en `/srv/sandbox` antes del montaje. | Revisar y mover esos archivos; montarlos encima los ocultaría. |
+| `findmnt: ... No se crea /srv/sandbox/pgdata` | `/srv/sandbox` no es el punto de montaje del Volumen_Sandbox. | El directorio de datos no se crea (R4.9). Revisar 4.3 y repetir. |
+| `hay otras áreas de swap activas` | La Instancia ya tenía otro swap. | Desactivarlo (`swapoff`) y quitarlo de `/etc/fstab`; se exige una sola área (R15.1). |
+
+### 4.2 Idempotencia (segunda ejecución)
+
+Justo después de 4.1, en la misma sesión:
+
+```bash
+antes=$(sudo sha256sum /etc/fstab); uuid_antes=$(findmnt -n -o UUID --mountpoint /srv/sandbox)
+sudo bash ~/bootstrap_host.sh <SandboxVolumeId> | tee /tmp/bootstrap-2.txt
+(
+  criterio="CA-20"; requisito="R4.5, R15.3 (idempotencia de T-16)"
+  despues=$(sudo sha256sum /etc/fstab); uuid_despues=$(findmnt -n -o UUID --mountpoint /srv/sandbox)
+  nswap=$(swapon --show=NAME --noheadings | awk 'NF' | wc -l)
+  fallos=()
+  [ "$antes" = "$despues" ] || fallos+=("/etc/fstab cambió en la segunda ejecución")
+  [ -n "$uuid_antes" ] && [ "$uuid_antes" = "$uuid_despues" ] || fallos+=("UUID de /srv/sandbox cambió: ${uuid_antes:-vacío} -> ${uuid_despues:-vacío} (¿se formateó?)")
+  grep -q 'ya tiene ext4: no se formatea' /tmp/bootstrap-2.txt || fallos+=("la segunda ejecución no informó 'no se formatea'")
+  [ "$nswap" -eq 1 ] || fallos+=("$nswap áreas de swap activas")
+  grep -q 'terminó sin errores' /tmp/bootstrap-2.txt || fallos+=("la segunda ejecución no terminó sin errores")
+  if [ ${#fallos[@]} -eq 0 ]; then
+    estado="aprobado"; detalle="segunda ejecución sin cambios: /etc/fstab idéntico, UUID $uuid_despues sin formatear, 1 área de swap"
+  else
+    estado="no_aprobado"; detalle="no conforme: $(printf '%s; ' "${fallos[@]}" | sed 's/; $//')"
+  fi
+  jq -cn --arg c "$criterio" --arg r "$requisito" --arg e "$estado" --arg d "$detalle" \
+    '{criterio: $c, requisito: $r, estado: $e, detalle: $d}'
+)
+```
+
+### 4.3 Montaje por UUID, `nofail` y directorio de datos (R4.5, R4.7, R4.9)
+
+Se ejecuta en la Instancia tras 4.1 y se repite después del reinicio de 3.6.3 (R4.7: montado sin intervención manual). Se define antes el ID del Volumen_Sandbox, como en 3.6.2.
+
+Consulta directa:
+
+```bash
+SANDBOX_VOLUME_ID=vol-xxxxxxxxxxxxxxxxx   # valor copiado de CloudShell
+findmnt /srv/sandbox
+grep /srv/sandbox /etc/fstab
+sudo blkid "$(readlink -f "/dev/disk/by-id/nvme-Amazon_Elastic_Block_Store_${SANDBOX_VOLUME_ID//-/}")"
+sudo stat -c '%n %u:%g %a' /srv/sandbox/pgdata
+ls -a /srv/sandbox
+```
+
+Resultado esperado: `findmnt` muestra `/srv/sandbox` con `ext4` desde el dispositivo NVMe del Volumen_Sandbox; `/etc/fstab` tiene una sola línea `UUID=<uuid> /srv/sandbox ext4 defaults,nofail,x-systemd.device-timeout=10s 0 2`, con el mismo UUID que `blkid`; `pgdata` es `999:999 700`; y `ls -a /srv/sandbox` muestra `lost+found` y `pgdata`.
+
+Evaluación automática del criterio (usa el `SANDBOX_VOLUME_ID` definido arriba):
+
+```bash
+(
+  criterio="CA-12"; requisito="R4.2, R4.5, R4.7, R4.9"
+  enlace="/dev/disk/by-id/nvme-Amazon_Elastic_Block_Store_${SANDBOX_VOLUME_ID//-/}"
+  if [[ "$SANDBOX_VOLUME_ID" != vol-* ]] || [[ "$SANDBOX_VOLUME_ID" == *x* ]]; then
+    estado="no_verificable"; detalle="SANDBOX_VOLUME_ID no está definido con el valor real"
+  elif ! disp=$(readlink -e "$enlace"); then
+    estado="no_aprobado"; detalle="no conforme: no existe $enlace (volumen no adjunto)"
+  else
+    uuid=$(sudo blkid -o value -s UUID "$disp")
+    tipo=$(sudo blkid -o value -s TYPE "$disp")
+    lineas=$(awk '$1 !~ /^#/ && $2 == "/srv/sandbox"' /etc/fstab)
+    nlineas=$(awk 'NF' <<< "$lineas" | wc -l)
+    m_uuid=$(findmnt -n -o UUID --mountpoint /srv/sandbox)
+    m_src=$(findmnt -n -o SOURCE --mountpoint /srv/sandbox)
+    duenio=$(sudo stat -c '%u:%g' /srv/sandbox/pgdata 2>/dev/null)
+    fallos=()
+    [ "$tipo" = "ext4" ] || fallos+=("sistema de archivos ${tipo:-ninguno} (se esperaba ext4)")
+    [ "$nlineas" -eq 1 ] || fallos+=("$nlineas entradas de /srv/sandbox en /etc/fstab (se esperaba 1)")
+    [ "$(awk '{print $1}' <<< "$lineas")" = "UUID=$uuid" ] || fallos+=("la entrada de /etc/fstab no usa UUID=$uuid: $lineas")
+    awk '{print $4}' <<< "$lineas" | tr ',' '\n' | grep -qx nofail || fallos+=("la entrada de /etc/fstab no tiene nofail")
+    { [ "$m_uuid" = "$uuid" ] && [ "$(readlink -f "$m_src")" = "$disp" ]; } \
+      || fallos+=("/srv/sandbox no está montado desde el Volumen_Sandbox (findmnt: ${m_src:-sin montar})")
+    [ "$duenio" = "999:999" ] || fallos+=("/srv/sandbox/pgdata con dueño ${duenio:-inexistente} (se esperaba 999:999)")
+    [ -d /srv/sandbox/lost+found ] || fallos+=("falta lost+found en la raíz del volumen")
+    if [ ${#fallos[@]} -eq 0 ]; then
+      estado="aprobado"
+      detalle="/srv/sandbox ext4 desde $m_src (UUID $uuid) con nofail en /etc/fstab; pgdata 999:999; lost+found en /srv/sandbox; arranque $(cut -c1-8 /proc/sys/kernel/random/boot_id)"
+    else
+      estado="no_aprobado"; detalle="no conforme: $(printf '%s; ' "${fallos[@]}" | sed 's/; $//')"
+    fi
+  fi
+  jq -cn --arg c "$criterio" --arg r "$requisito" --arg e "$estado" --arg d "$detalle" \
+    '{criterio: $c, requisito: $r, estado: $e, detalle: $d}'
+)
+```
+
+El `detalle` incluye el inicio del `boot_id`, para distinguir la línea anterior y la posterior al reinicio de 3.6.3. R4.7 queda aprobado solo con la línea posterior al reinicio en `aprobado`.
+
+### 4.4 `SANDBOX_DATA_DIR` y datos de `sandbox_db` en el Volumen_Sandbox (R4.2, R4.4)
+
+Se ejecuta en la Instancia después de generar el `.env` con `make_env.sh` (tarea 6.2) y de desplegar (sección 5). `APP_DIR` es el directorio del repositorio en la Instancia, el mismo de las secciones 5 y 6.
+
+Consulta directa:
+
+```bash
+APP_DIR=/home/ubuntu/PgGuardian-Online   # ajustar si el repositorio está en otra ruta
+grep '^SANDBOX_DATA_DIR=' "$APP_DIR/.env"
+df -h /srv/sandbox/pgdata
+df -h /
+sudo docker inspect pgguardian_sandboxdb_prod \
+  -f '{{range .Mounts}}{{.Type}} {{.Source}} -> {{.Destination}}{{"\n"}}{{end}}'
+```
+
+Resultado esperado: `SANDBOX_DATA_DIR=/srv/sandbox/pgdata`; `df -h /srv/sandbox/pgdata` muestra el dispositivo NVMe del Volumen_Sandbox (unos 8 GB) y `df -h /` otro dispositivo (unos 20 GB); el contenedor tiene `bind /srv/sandbox/pgdata -> /var/lib/postgresql/data`.
+
+Evaluación automática del criterio:
+
+```bash
+APP_DIR=/home/ubuntu/PgGuardian-Online
+(
+  criterio="CA-12"; requisito="R4.2, R4.4"
+  envf="$APP_DIR/.env"
+  if [ ! -r "$envf" ]; then
+    estado="no_verificable"; detalle="no se puede leer $envf; ¿se ejecutó make_env.sh (tarea 6.2)?"
+  else
+    valores=$(sed -n 's/^SANDBOX_DATA_DIR=//p' "$envf")
+    nval=$(awk 'NF' <<< "$valores" | wc -l)
+    src_pg=$(df --output=source /srv/sandbox/pgdata 2>/dev/null | tail -n1)
+    src_sb=$(findmnt -n -o SOURCE --mountpoint /srv/sandbox)
+    src_raiz=$(df --output=source / | tail -n1)
+    montaje=$(sudo docker inspect pgguardian_sandboxdb_prod \
+      -f '{{range .Mounts}}{{if eq .Destination "/var/lib/postgresql/data"}}{{.Type}} {{.Source}}{{end}}{{end}}' 2>/dev/null)
+    fallos=()
+    { [ "$nval" -eq 1 ] && [ "$valores" = "/srv/sandbox/pgdata" ]; } \
+      || fallos+=("SANDBOX_DATA_DIR en .env: '${valores:-ausente}' (se esperaba exactamente /srv/sandbox/pgdata)")
+    { [ -n "$src_pg" ] && [ "$src_pg" = "$src_sb" ] && [ "$src_pg" != "$src_raiz" ]; } \
+      || fallos+=("/srv/sandbox/pgdata está en ${src_pg:-?}; Volumen_Sandbox ${src_sb:-sin montar}; / en $src_raiz")
+    [ "$montaje" = "bind /srv/sandbox/pgdata" ] || fallos+=("sandbox_db monta '${montaje:-nada}' en /var/lib/postgresql/data")
+    sudo test -e /srv/sandbox/pgdata/lost+found && fallos+=("hay lost+found dentro de pgdata")
+    if [ ${#fallos[@]} -eq 0 ]; then
+      estado="aprobado"
+      detalle="SANDBOX_DATA_DIR=/srv/sandbox/pgdata; pgdata en $src_pg (Volumen_Sandbox), / en $src_raiz; sandbox_db: bind /srv/sandbox/pgdata; sin lost+found en pgdata"
+    else
+      estado="no_aprobado"; detalle="no conforme: $(printf '%s; ' "${fallos[@]}" | sed 's/; $//')"
+    fi
+  fi
+  jq -cn --arg c "$criterio" --arg r "$requisito" --arg e "$estado" --arg d "$detalle" \
+    '{criterio: $c, requisito: $r, estado: $e, detalle: $d}'
+)
+```
+
+Si `SANDBOX_DATA_DIR` falta, el compose usa `./.data/sandbox` y los datos de `sandbox_db` quedan en el disco raíz sin aviso. Corrección: `docker compose -f docker-compose.prod.yml down`, volver a generar el `.env` con `make_env.sh` (tarea 6.2), desplegar con `deploy.sh` (que falla si el valor falta o difiere) y repetir 4.4. Después se borra `$APP_DIR/.data/sandbox`, que quedó en el disco raíz.
+
+### 4.5 Swap (R15.1)
+
+Consulta directa:
+
+```bash
+swapon --show
+swapon --show=NAME,SIZE --bytes --noheadings
+grep swap /etc/fstab
+```
+
+Resultado esperado: una sola fila `/swapfile file 2G`; en bytes, `2147479552` (2 GiB menos la página de cabecera de 4 KiB, dentro de ±1 MiB); y una línea `/swapfile none swap sw 0 0` en `/etc/fstab`.
+
+Evaluación automática del criterio:
+
+```bash
+(
+  criterio="CA-20"; requisito="R15.1"
+  esperado=2147483648; tol=1048576
+  areas=$(swapon --show=NAME,SIZE --bytes --noheadings)
+  n=$(awk 'NF' <<< "$areas" | wc -l)
+  nombre=$(awk 'NR == 1 {print $1}' <<< "$areas"); tam=$(awk 'NR == 1 {print $2}' <<< "$areas")
+  nfstab=$(awk '$1 !~ /^#/ && $1 == "/swapfile" && $3 == "swap"' /etc/fstab | wc -l)
+  fallos=()
+  [ "$n" -eq 1 ] || fallos+=("$n áreas de swap activas (se esperaba 1): $(tr '\n' ';' <<< "$areas")")
+  [ "$nombre" = "/swapfile" ] || fallos+=("el área activa es ${nombre:-ninguna}, no /swapfile")
+  if [[ "$tam" =~ ^[0-9]+$ ]]; then
+    d=$(( tam - esperado )); d=${d#-}
+    [ "$d" -le "$tol" ] || fallos+=("tamaño $tam bytes, fuera de 2 GiB ±1 MiB")
+  else
+    fallos+=("no se pudo leer el tamaño del swap")
+  fi
+  [ "$nfstab" -eq 1 ] || fallos+=("$nfstab entradas de /swapfile en /etc/fstab (se esperaba 1)")
+  if [ ${#fallos[@]} -eq 0 ]; then
+    estado="aprobado"; detalle="1 área: /swapfile $tam bytes (2 GiB ±1 MiB); 1 entrada en /etc/fstab"
+  else
+    estado="no_aprobado"; detalle="no conforme: $(printf '%s; ' "${fallos[@]}" | sed 's/; $//')"
+  fi
+  jq -cn --arg c "$criterio" --arg r "$requisito" --arg e "$estado" --arg d "$detalle" \
+    '{criterio: $c, requisito: $r, estado: $e, detalle: $d}'
+)
+```
+
+Si el swap no se activa durante un arranque (R15.4), systemd no detiene el arranque: la unidad `swapfile.swap` queda en estado fallido, `swapon --show` no muestra áreas y el error queda en el registro del sistema. Se consulta con `systemctl status swapfile.swap` y `journalctl -b -u swapfile.swap`, se anota la causa y se repite `sudo bash ~/bootstrap_host.sh <SandboxVolumeId>`, que vuelve a activarlo sin duplicarlo.
+
+### 4.6 Swap tras 3 reinicios (R15.2, R15.3, modifica: reinicia la Instancia 3 veces)
+
+> **Atención.** Este bloque reinicia la Instancia tres veces seguidas; la aplicación deja de responder unos minutos en total. Se avisa al Equipo antes.
+
+Se ejecuta en CloudShell con las variables y la función `ssm_run` de 3.2. En cada reinicio espera el nuevo `boot_id` (como 3.6.3), espera a que el sistema lleve al menos 60 s arrancado y lee `swapon`:
+
+```bash
+(
+  criterio="CA-20"; requisito="R15.2, R15.3"
+  esperado=2147483648; tol=1048576
+  estado=""; ok=(); fallos=()
+  if [ -z "$INSTANCE_ID" ] || ! declare -F ssm_run >/dev/null; then
+    estado="no_verificable"; detalle="faltan INSTANCE_ID o ssm_run; ejecutar 3.2"
+  else
+    for i in 1 2 3; do
+      if ! boot0=$(ssm_run 'cat /proc/sys/kernel/random/boot_id') || [ -z "$boot0" ]; then
+        estado="no_verificable"; detalle="reinicio $i: no se pudo leer boot_id por Run Command; revisar 3.4.3"; break
+      fi
+      if ! err=$(aws ec2 reboot-instances --instance-ids "$INSTANCE_ID" 2>&1); then
+        estado="no_verificable"; detalle="reinicio $i: falló aws ec2 reboot-instances: $(echo "$err" | tr '\n' ' ')"; break
+      fi
+      SECONDS=0; volvio=""; sleep 20
+      while [ "$SECONDS" -lt 300 ]; do
+        if boot1=$(ssm_run 'cat /proc/sys/kernel/random/boot_id' 2>/dev/null) \
+           && [ -n "$boot1" ] && [ "$boot1" != "$boot0" ]; then volvio="si"; break; fi
+        sleep 10
+      done
+      if [ -z "$volvio" ]; then fallos+=("reinicio $i: la instancia no volvió en 300 s"); break; fi
+      up=$(ssm_run 'cut -d" " -f1 /proc/uptime' 2>/dev/null); up=${up%%.*}
+      [[ "$up" =~ ^[0-9]+$ ]] && [ "$up" -lt 60 ] && sleep $(( 60 - up ))
+      sw=$(ssm_run 'swapon --show=NAME,SIZE --bytes --noheadings' 2>/dev/null)
+      n=$(awk 'NF' <<< "$sw" | wc -l)
+      nombre=$(awk 'NR == 1 {print $1}' <<< "$sw"); tam=$(awk 'NR == 1 {print $2}' <<< "$sw")
+      d=$(( ${tam:-0} - esperado )); d=${d#-}
+      if [ "$n" -eq 1 ] && [ "$nombre" = "/swapfile" ] && [ "$d" -le "$tol" ]; then
+        ok+=("reinicio $i: /swapfile $tam bytes")
+      else
+        fallos+=("reinicio $i: $n áreas activas ($(tr '\n' ';' <<< "$sw"))")
+      fi
+    done
+  fi
+  if [ -z "$estado" ]; then
+    if [ ${#fallos[@]} -eq 0 ] && [ ${#ok[@]} -eq 3 ]; then
+      estado="aprobado"; detalle="tras 3 reinicios, 1 área de swap de 2 GiB ±1 MiB a los ≥ 60 s del arranque: $(printf '%s; ' "${ok[@]}" | sed 's/; $//')"
+    else
+      estado="no_aprobado"; detalle="no conforme: $(printf '%s; ' "${fallos[@]}" "${ok[@]}" | sed 's/; $//')"
+    fi
+  fi
+  jq -cn --arg c "$criterio" --arg r "$requisito" --arg e "$estado" --arg d "$detalle" \
+    '{criterio: $c, requisito: $r, estado: $e, detalle: $d}'
+)
+```
+
+Resultado esperado: `aprobado`, con tres entradas `/swapfile 2147479552 bytes`. El tiempo de 60 s se mide con `/proc/uptime`, desde el arranque del kernel. Después del bloque se repite 4.3 en la Instancia (montaje tras reinicio, R4.7).
+
+### 4.7 Parches automáticos y Docker al arranque (R18, R19.8)
+
+#### 4.7.1 `unattended-upgrades` (CA-22 · R18.1 a R18.4)
+
+Consulta directa, en la Instancia:
+
+```bash
+systemctl is-active unattended-upgrades; systemctl is-enabled unattended-upgrades
+cat /etc/apt/apt.conf.d/20auto-upgrades
+apt-config dump Unattended-Upgrade::Allowed-Origins Unattended-Upgrade::Origins-Pattern
+sudo unattended-upgrade --dry-run --debug 2>&1 | grep -i 'allowed origins'
+```
+
+Resultado esperado: `active` y `enabled`; `20auto-upgrades` con exactamente `APT::Periodic::Update-Package-Lists "1";` y `APT::Periodic::Unattended-Upgrade "1";`; un solo origen permitido, `${distro_id}:${distro_codename}-security`, sin `Origins-Pattern`; y `Allowed origins are: o=Ubuntu,a=noble-security`.
+
+Evaluación automática del criterio:
+
+```bash
+(
+  criterio="CA-22"; requisito="R18.1, R18.2, R18.3, R18.4"
+  act=$(systemctl is-active unattended-upgrades); rc_act=$?
+  ena=$(systemctl is-enabled unattended-upgrades); rc_ena=$?
+  upl=""; uu=""
+  eval "$(apt-config shell upl APT::Periodic::Update-Package-Lists uu APT::Periodic::Unattended-Upgrade)"
+  origenes=$(apt-config dump Unattended-Upgrade::Allowed-Origins \
+    | sed -n 's/^Unattended-Upgrade::Allowed-Origins:: "\(.*\)";$/\1/p' | paste -sd, -)
+  patrones=$(apt-config dump Unattended-Upgrade::Origins-Pattern | grep -c '^Unattended-Upgrade::Origins-Pattern:: ')
+  fallos=()
+  dpkg -s unattended-upgrades >/dev/null 2>&1 || fallos+=("paquete unattended-upgrades no instalado")
+  { [ "$act" = "active" ] && [ "$rc_act" -eq 0 ]; } || fallos+=("is-active=$act (código $rc_act)")
+  { [ "$ena" = "enabled" ] && [ "$rc_ena" -eq 0 ]; } || fallos+=("is-enabled=$ena (código $rc_ena)")
+  grep -qx 'APT::Periodic::Update-Package-Lists "1";' /etc/apt/apt.conf.d/20auto-upgrades \
+    && grep -qx 'APT::Periodic::Unattended-Upgrade "1";' /etc/apt/apt.conf.d/20auto-upgrades \
+    || fallos+=("20auto-upgrades sin las dos líneas \"1\"")
+  { [ "$upl" = "1" ] && [ "$uu" = "1" ]; } || fallos+=("valores efectivos Update-Package-Lists=$upl, Unattended-Upgrade=$uu")
+  [ "$origenes" = '${distro_id}:${distro_codename}-security' ] || fallos+=("orígenes permitidos: ${origenes:-ninguno}")
+  [ "$patrones" -eq 0 ] || fallos+=("$patrones Origins-Pattern definidos")
+  if [ ${#fallos[@]} -eq 0 ]; then
+    estado="aprobado"
+    detalle="unattended-upgrades active/enabled; 20auto-upgrades 1/1; solo origen $origenes"
+  else
+    estado="no_aprobado"; detalle="no conforme: $(printf '%s; ' "${fallos[@]}" | sed 's/; $//')"
+  fi
+  jq -cn --arg c "$criterio" --arg r "$requisito" --arg e "$estado" --arg d "$detalle" \
+    '{criterio: $c, requisito: $r, estado: $e, detalle: $d}'
+)
+```
+
+R18.5 es el comportamiento de `unattended-upgrades`: si un parche falla, el error queda en `/var/log/unattended-upgrades/unattended-upgrades.log` (y la salida de `dpkg` en `unattended-upgrades-dpkg.log`), y los paquetes ya instalados no se revierten. Se revisa con `sudo tail -n 50 /var/log/unattended-upgrades/unattended-upgrades.log` al día siguiente de la configuración; si hay errores, se anotan en la evidencia con la fecha.
+
+#### 4.7.2 Docker habilitado al arranque (R19.8)
+
+```bash
+(
+  criterio="CA-23"; requisito="R19.8 (Docker al arranque)"
+  ena=$(systemctl is-enabled docker 2>&1); act=$(systemctl is-active docker 2>&1)
+  if [ "$ena" = "enabled" ] && [ "$act" = "active" ] && docker compose version >/dev/null 2>&1; then
+    estado="aprobado"; detalle="docker enabled/active; $(docker --version); $(docker compose version)"
+  else
+    estado="no_aprobado"; detalle="no conforme: docker is-enabled=$ena, is-active=$act, compose $(docker compose version 2>&1 | head -n1)"
+  fi
+  jq -cn --arg c "$criterio" --arg r "$requisito" --arg e "$estado" --arg d "$detalle" \
+    '{criterio: $c, requisito: $r, estado: $e, detalle: $d}'
+)
+```
+
+La recuperación completa de la aplicación tras detener e iniciar la Instancia (R19.8) se verifica en la sección 6.
+
+### 4.8 Prueba de llenado del Volumen_Sandbox (R4.10, modifica: llena y vacía el Volumen_Sandbox)
+
+> **Atención.** La prueba llena el Volumen_Sandbox al 100 %. Mientras dura, los análisis nuevos fallan en el sandbox; el login y el historial (en `app_db`, disco raíz) deben seguir respondiendo. Se avisa al Equipo y no se ejecutan análisis durante la prueba.
+
+Requisitos previos: la aplicación desplegada (sección 5) y una cuenta de prueba registrada en la aplicación. La contraseña se escribe con `read -s`: no queda en el historial ni en la línea de comandos. Si se equivoca la contraseña 5 veces, la cuenta se bloquea 15 min.
+
+Se ejecuta en la Instancia como `ubuntu`, en una sola sesión:
+
+```bash
+APP_DIR=/home/ubuntu/PgGuardian-Online
+cd "$APP_DIR"
+envval() { sed -n "s/^$1=//p" .env | tail -n1; }
+SB_USER=$(envval SANDBOX_DB_ADMIN_USER); SB_DB=$(envval SANDBOX_DB_NAME); DOMINIO=$(envval APP_DOMAIN)
+SB=pgguardian_sandboxdb_prod
+read -rp "Correo de la cuenta de prueba: " PRUEBA_EMAIL
+read -rsp "Contraseña: " PRUEBA_PASS; echo
+
+psql_sb() { sudo docker exec -i "$SB" psql -U "$SB_USER" -d "$SB_DB" -v ON_ERROR_STOP=1 -qAt "$@"; }
+pct() { df --output=pcent "$1" | tail -n1 | tr -dc '0-9'; }
+# Imprime: código_login segundos_login código_historial segundos_historial
+medir() {
+  local jar l h; jar=$(mktemp)
+  l=$(jq -cn --arg e "$PRUEBA_EMAIL" --arg p "$PRUEBA_PASS" '{email: $e, password: $p}' \
+      | curl -s -o /dev/null -w '%{http_code} %{time_total}' -m 10 -c "$jar" \
+          -H 'Content-Type: application/json' --data @- "https://$DOMINIO/api/auth/login")
+  h=$(curl -s -o /dev/null -w '%{http_code} %{time_total}' -m 10 -b "$jar" "https://$DOMINIO/api/analyses")
+  rm -f "$jar"; echo "$l $h"
+}
+
+echo "antes: / $(pct /)%  /srv/sandbox $(pct /srv/sandbox)%  medida: $(medir)"
+RAIZ_ANTES=$(pct /)
+
+# Llenado: lotes de 500 000 filas de ~1 KB (≈ 0.5 GB + WAL) hasta que el disco se llena.
+psql_sb -c "CREATE TABLE IF NOT EXISTS pgg_relleno (g bigint, relleno text)"
+lote=0
+while [ "$(pct /srv/sandbox)" -lt 100 ] && [ "$lote" -lt 40 ]; do
+  lote=$((lote + 1))
+  if ! psql_sb -c "INSERT INTO pgg_relleno SELECT g, repeat(md5(random()::text), 32) FROM generate_series(1, 500000) g" 2>/tmp/relleno.err; then
+    echo "lote $lote: $(tail -n1 /tmp/relleno.err)"; break
+  fi
+  echo "lote $lote: /srv/sandbox $(pct /srv/sandbox)%"
+done
+df -h /srv/sandbox /
+```
+
+Resultado esperado del llenado: el último lote termina con un error `could not extend file ...: No space left on device` (o el contenedor se reinicia por falta de espacio para el WAL) y `df -h /srv/sandbox` muestra `100%`. Las filas de 1 KB no se comprimen (PostgreSQL solo comprime filas de más de unos 2 KB), así que ocupan su tamaño real.
+
+Con el volumen lleno, en la misma sesión:
+
+```bash
+(
+  criterio="CA-12"; requisito="R4.10"
+  uso_sb=$(pct /srv/sandbox); raiz_despues=$(pct /)
+  medidas=(); fallos=()
+  for i in 1 2 3; do
+    read -r cl tl ch th <<< "$(medir)"
+    medidas+=("login $cl ${tl}s, historial $ch ${th}s")
+    [[ "$cl" =~ ^2 ]] && awk -v t="$tl" 'BEGIN { exit !(t <= 3) }' || fallos+=("intento $i: login $cl en ${tl}s")
+    [[ "$ch" =~ ^2 ]] && awk -v t="$th" 'BEGIN { exit !(t <= 3) }' || fallos+=("intento $i: historial $ch en ${th}s")
+  done
+  var=$(( raiz_despues - RAIZ_ANTES )); var=${var#-}
+  [ "$uso_sb" -eq 100 ] || fallos+=("/srv/sandbox al ${uso_sb}% (se esperaba 100%)")
+  [ "$var" -le 1 ] || fallos+=("/ pasó de ${RAIZ_ANTES}% a ${raiz_despues}% (variación > 1 pp)")
+  if [ ${#fallos[@]} -eq 0 ]; then
+    estado="aprobado"
+    detalle="/srv/sandbox 100%; / ${RAIZ_ANTES}% -> ${raiz_despues}%; $(printf '%s; ' "${medidas[@]}" | sed 's/; $//')"
+  else
+    estado="no_aprobado"; detalle="no conforme: $(printf '%s; ' "${fallos[@]}" | sed 's/; $//')"
+  fi
+  jq -cn --arg c "$criterio" --arg r "$requisito" --arg e "$estado" --arg d "$detalle" \
+    '{criterio: $c, requisito: $r, estado: $e, detalle: $d}'
+)
+```
+
+Resultado esperado: `aprobado`, con 3 logins y 3 consultas de historial con código 200 en ≤ 3 s cada uno, y `/` sin variar más de 1 punto porcentual. El uso de 100 % se mide con `df`, que no cuenta el 5 % que ext4 reserva para root; `sandbox_db` corre como UID 999 y no puede usar esa reserva.
+
+Limpieza (obligatoria al terminar):
+
+```bash
+psql_sb -c "DROP TABLE IF EXISTS pgg_relleno" && psql_sb -c "CHECKPOINT"
+unset PRUEBA_PASS
+df -h /srv/sandbox
+sudo docker ps --filter name=pgguardian_sandboxdb_prod --format '{{.Names}} {{.Status}}'
+```
+
+Resultado esperado: `/srv/sandbox` vuelve a un uso bajo y `sandbox_db` queda `Up (healthy)`. Si PostgreSQL no arranca porque no tiene espacio ni para el WAL (el contenedor aparece `Restarting`), se reinicia el sandbox desde cero. Sus datos son desechables: cada análisis crea sus bases y roles temporales, y el historial vive en `app_db`. El directorio `pgdata` se conserva con su dueño `999:999`:
+
+```bash
+cd "$APP_DIR"
+sudo docker compose -f docker-compose.prod.yml stop sandbox_db
+sudo find /srv/sandbox/pgdata -mindepth 1 -delete
+sudo docker compose -f docker-compose.prod.yml up -d sandbox_db
+```
+
+Después se comprueba que `sandbox_db` llega a `healthy` y que un análisis de prueba termina bien.
+
+### 4.9 Prueba manual de volumen ausente (R4.8, modifica: detiene la Instancia y desadjunta el Volumen_Sandbox)
+
+> **Atención.** La prueba detiene la Instancia dos veces y desadjunta el Volumen_Sandbox fuera de CloudFormation. Al final se vuelve a adjuntar el mismo volumen en el mismo dispositivo (`/dev/sdf`), así que el stack queda como lo define la plantilla. Es la única excepción documentada, junto con la de 2.5, a la regla de no cambiar recursos fuera de un change set. Se avisa al Equipo y se toma antes un snapshot de ambos discos (sección 8).
+
+1. En CloudShell (variables de 3.2), detener la Instancia y desadjuntar el volumen:
+
+   ```bash
+   aws ec2 stop-instances --instance-ids "$INSTANCE_ID" >/dev/null
+   aws ec2 wait instance-stopped --instance-ids "$INSTANCE_ID"
+   aws ec2 detach-volume --volume-id "$SANDBOX_VOLUME_ID" >/dev/null
+   aws ec2 wait volume-available --volume-ids "$SANDBOX_VOLUME_ID"
+   aws ec2 start-instances --instance-ids "$INSTANCE_ID" >/dev/null
+   aws ec2 wait instance-running --instance-ids "$INSTANCE_ID"
+   ```
+
+2. Esperar a que la Instancia aparezca `Online` en Systems Manager (3.4.3). Que la sesión de Session Manager abra ya demuestra que el SO terminó de arrancar sin entrar en modo de emergencia (`nofail`).
+
+3. En la Instancia (`sudo -iu ubuntu bash`), esperar 2 minutos para que Docker intente levantar los contenedores y ejecutar:
+
+   Consulta directa:
+
+   ```bash
+   systemctl is-system-running
+   findmnt /srv/sandbox; ls -a /srv/sandbox; ls /srv/sandbox/pgdata
+   df /srv/sandbox; df /
+   sudo docker ps -a --filter name=pgguardian_sandboxdb_prod --format '{{.Names}} {{.Status}}'
+   sudo docker inspect pgguardian_sandboxdb_prod -f '{{.State.Status}} {{.State.Error}}'
+   ```
+
+   Resultado esperado: el sistema `running` o `degraded` (no `emergency` ni `maintenance`); `findmnt` no imprime nada; `/srv/sandbox` vacío; `ls /srv/sandbox/pgdata` falla con `No such file or directory`; `df /srv/sandbox` muestra el mismo dispositivo que `df /`; y `sandbox_db` no está en ejecución, con un error del tipo `invalid mount config for type "bind": bind source path does not exist: /srv/sandbox/pgdata`.
+
+   Evaluación automática del criterio:
+
+   ```bash
+   (
+     criterio="CA-12"; requisito="R4.8"
+     sistema=$(systemctl is-system-running 2>/dev/null)
+     mnt=$(findmnt -n --mountpoint /srv/sandbox)
+     src_sb=$(df --output=source /srv/sandbox | tail -n1); src_raiz=$(df --output=source / | tail -n1)
+     cont=$(sudo docker inspect pgguardian_sandboxdb_prod -f '{{.State.Running}}|{{.State.Error}}' 2>&1)
+     fallos=()
+     case "$sistema" in running|degraded) ;; *) fallos+=("systemctl is-system-running=$sistema") ;; esac
+     [ -z "$mnt" ] || fallos+=("/srv/sandbox está montado ($mnt); el volumen sigue adjunto")
+     ls /srv/sandbox/pgdata >/dev/null 2>&1 && fallos+=("/srv/sandbox/pgdata existe en el disco raíz")
+     [ "$src_sb" = "$src_raiz" ] || fallos+=("df /srv/sandbox muestra $src_sb, no el dispositivo raíz $src_raiz")
+     [[ "$cont" == false\|* ]] || fallos+=("sandbox_db en ejecución o sin datos: $cont")
+     if [ ${#fallos[@]} -eq 0 ]; then
+       estado="aprobado"
+       detalle="sin Volumen_Sandbox: sistema $sistema; /srv/sandbox sin montar en $src_raiz; /srv/sandbox/pgdata no existe; sandbox_db detenido (${cont#false|})"
+     else
+       estado="no_aprobado"; detalle="no conforme: $(printf '%s; ' "${fallos[@]}" | sed 's/; $//')"
+     fi
+     jq -cn --arg c "$criterio" --arg r "$requisito" --arg e "$estado" --arg d "$detalle" \
+       '{criterio: $c, requisito: $r, estado: $e, detalle: $d}'
+   )
+   ```
+
+   No se ejecuta `bootstrap_host.sh` en este estado: abortaría en el paso 1 sin cambiar nada, pero no hace falta. Tampoco se crea `/srv/sandbox/pgdata` a mano.
+
+4. Restaurar, en CloudShell:
+
+   ```bash
+   aws ec2 stop-instances --instance-ids "$INSTANCE_ID" >/dev/null
+   aws ec2 wait instance-stopped --instance-ids "$INSTANCE_ID"
+   aws ec2 attach-volume --volume-id "$SANDBOX_VOLUME_ID" --instance-id "$INSTANCE_ID" --device /dev/sdf >/dev/null
+   aws ec2 wait volume-in-use --volume-ids "$SANDBOX_VOLUME_ID"
+   aws ec2 start-instances --instance-ids "$INSTANCE_ID" >/dev/null
+   aws ec2 wait instance-running --instance-ids "$INSTANCE_ID"
+   ```
+
+5. Comprobar la vuelta: 3.6.1 (volumen en `/dev/sdf`), 4.3 en la Instancia y `sudo docker ps` con `sandbox_db` `Up (healthy)`. Docker lo vuelve a levantar solo al arrancar (`restart: unless-stopped`); si no, `cd "$APP_DIR" && sudo docker compose -f docker-compose.prod.yml up -d sandbox_db`.
+
+### 4.10 Resumen de la sección 4
+
+| Criterio | Bloques que deben estar en `aprobado` | Partes en otras secciones |
+| --- | --- | --- |
+| CA-12 | 4.3 (antes y después del reinicio), 4.4, 4.8, 4.9 | 3.6.2 |
+| CA-20 | 4.2, 4.5, 4.6 | 3.4.2, 3.6.1, 3.6.3 |
+| CA-22 | 4.7.1 | — |
+| CA-23 | 4.7.2 (apoyo a R19.8) | 3.8, secciones 5 y 6 |
+
+Un criterio nunca se da por aprobado con un bloque en `no_aprobado` o `no_verificable`: se corrige la causa y se repite el bloque, conservando la línea anterior en la evidencia.
 
 ## 5. Despliegue
 
