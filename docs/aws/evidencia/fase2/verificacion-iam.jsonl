@@ -24,3 +24,9 @@
 {"criterio":"sin CA","requisito":"R29.7 (change set CREATE, segundo intento)","estado":"aprobado","detalle":"change set pgguardian-20261126-0318: 11 recursos, todos Add; revisado por Chus Avila"}
 {"criterio":"sin CA","requisito":"R29.8","estado":"aprobado","detalle":"StackStatus=CREATE_COMPLETE, EnableTerminationProtection=True"}
 {"criterio":"sin CA","requisito":"R29.3","estado":"aprobado","detalle":"InstanceId=i-06ed7dab83c04f8bb, PublicIp=3.14.31.64, AppDomain=3-14-31-64.sslip.io, SandboxVolumeId=vol-0ce09703b3674e7ac"}
+
+{"criterio":"CA-18","requisito":"R11.1, R11.2, R11.4","estado":"aprobado","detalle":"i-06ed7dab83c04f8bb sin KeyName; sg-0f371ca82fd1e0165 sin reglas de entrada para TCP/22"}
+{"criterio":"CA-17","requisito":"R11.3","estado":"aprobado","detalle":"CloudTrail us-east-2 registra StartSession de arn:aws:iam::<cuenta>:user/jesus.avila hacia i-06ed7dab83c04f8bb (2026-11-26T04:09:09Z, 05:11:58Z, 17:40:33Z; sin errorCode); consulta lookup-events de 24 h"}
+{"criterio":"CA-20","requisito":"R4.5, R15.3 (idempotencia de T-16)","estado":"aprobado","detalle":"segunda ejecución sin cambios: /etc/fstab idéntico, UUID 90185190-d19e-4390-bcd9-b0ecb8b1f9f7 sin formatear, 1 área de swap"}
+{"criterio":"CA-17","requisito":"R11.3","estado":"aprobado","detalle":"StartSession en CloudTrail tras 123 s de consulta: {\"hora\":\"2026-11-26T18:42:53Z\",\"usuario\":\"arn:aws:iam::535002889023:user/jesus.avila\",\"instancia\":\"i-06ed7dab83c04f8bb\",\"sesion\":\"jesus.avila-xvvdjoo5oyl785rq667tbh3kva\"}"}
+{"criterio":"CA-12","requisito":"R4.2, R4.5, R4.7, R4.9","estado":"aprobado","detalle":"/srv/sandbox ext4 desde /dev/nvme1n1 (UUID 90185190-d19e-4390-bcd9-b0ecb8b1f9f7) con nofail en /etc/fstab; pgdata 999:999; lost+found en /srv/sandbox; arranque 86c90e7a"}

@@ -91,3 +91,15 @@ Esta entrada no corresponde a ninguno de los criterios R24.1 a R24.10: registra 
 | `justificacion` | AWS permite un solo monitor de servicios por cuenta, así que el del stack no puede crearse mientras exista el por defecto. Además, el umbral por defecto (100 USD y 40 %) no avisaría con el gasto esperado, de unos 22 USD al mes. |
 | `fecha` | 2026-11-25 |
 | `aprobador` | *pendiente* (se anota en la especificación en un máximo de 2 días hábiles, R24.11) |
+
+### Código en la Instancia: clon por HTTPS (repositorio público)
+
+Esta entrada no corresponde a ninguno de los criterios R24.1 a R24.10: registra un cambio del diseño, no una desviación de la fuente. Usa los mismos campos y la misma regla de aprobación (R24.11, R24.12).
+
+| Campo | Valor |
+| --- | --- |
+| `requisito_afectado` | T-17 y sección 5 del runbook (cómo llega el código a la Instancia). R10.2 y R19.2 como límite: sin claves de AWS ni secretos en el repositorio. No cambia criterios de verificación. |
+| `cambio` | Se usa la variante A del runbook 5.1: clon por HTTPS del repositorio público `https://github.com/luiselodeon/PgGuardian-Online`. La rama es `e2-fase4` por ahora y pasa a `master` al fusionar las PR. La variante B (clon por SSH con una deploy key de solo lectura, limitada a este repositorio) queda documentada en el runbook 5.1 como alternativa si el repositorio vuelve a ser privado. |
+| `justificacion` | El 2026-11-26 el repositorio `luiselodeon/PgGuardian-Online` se hizo público. Con el repositorio público, el clon por HTTPS no necesita credenciales en la Instancia: no queda ninguna clave ni token que guardar, rotar o revocar. El mismo día, después de hacerlo público, se revisó el historial completo (git log -p --all --no-textconv) en busca de claves AWS, llaves privadas, tokens de GitHub, archivos .env y contraseñas: sin hallazgos de secretos reales (solo placeholders, valores por defecto de desarrollo y datos de prueba). Alternativas: (B) deploy key de solo lectura por SSH, necesaria solo si el repositorio es privado; (C) token personal (PAT), que tiene más alcance y queda ligado a un usuario. |
+| `fecha` | 2026-11-26 |
+| `aprobador` | *pendiente* (se anota en la especificación en un máximo de 2 días hábiles, R24.11) |

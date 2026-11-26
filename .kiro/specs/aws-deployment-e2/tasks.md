@@ -176,13 +176,13 @@ Lenguajes: Python (FastAPI, unittest), JavaScript (React/Vite), YAML (Compose y 
     - En la sección host del runbook: entrar con `sudo -iu ubuntu bash` (Session Manager abre `sh`); llevar el script a la instancia con un heredoc (`cat > ~/bootstrap_host.sh <<'EOF' … EOF`, funciona con el repo privado) o con `curl` del archivo raw si el repo es público; ejecutar con `sudo bash ~/bootstrap_host.sh <SandboxVolumeId>`.
     - _RF-04.4, RF-05.5, RF-06.3, RF-06.4, RF-06.7 · CA-12, CA-17, CA-18, CA-20, CA-22 · Requirements: 4.5, 4.6, 4.7, 4.8, 4.9, 4.10, 11.1, 11.3, 11.4, 11.5, 15.1, 15.2, 15.3, 15.4, 18.1, 18.2, 18.3, 18.4, 18.5, 19.8_
 
-  - [ ] 6.2 T-17: Plantilla `.env` de producción y generación de secretos
+  - [x] 6.2 T-17: Plantilla `.env` de producción y generación de secretos
     - Actualizar `.env.prod.example` con `JWT_SECRET` documentado como obligatorio, `APP_DOMAIN`, `CORS_ORIGINS`, `COOKIE_SECURE` y `TRUST_PROXY_HEADERS`, sin claves de AWS (`SANDBOX_DATA_DIR` ya se añade en T-04).
     - Crear `scripts/aws/make_env.sh`: genera `JWT_SECRET` con `openssl rand -hex 32`, recibe `APP_DOMAIN` como argumento con el valor del output `AppDomain` del stack (el rol de la instancia no tiene permisos de CloudFormation), define `SANDBOX_DATA_DIR=/srv/sandbox/pgdata` y aplica permisos `600`.
     - Al terminar, `make_env.sh` comprueba `SANDBOX_DATA_DIR=/srv/sandbox/pgdata` en el `.env` generado y falla si falta o difiere, porque el valor por defecto dejaría los datos de `sandbox_db` en el disco raíz.
     - _RF-04.1, RF-04.4, RF-03.4, RF-03.5 (E1) · CA-09, CA-12, CA-23 · Requirements: 1.4, 4.4, 10.2, 19.2, 29.3_
 
-  - [ ] 6.3 T-18: Despliegue con HTTPS válido
+  - [x] 6.3 T-18: Despliegue con HTTPS válido
     - Crear `scripts/aws/deploy.sh`: antes de `up`, falla si `SANDBOX_DATA_DIR` falta o difiere de `/srv/sandbox/pgdata` en el `.env`; ejecuta `docker compose -f docker-compose.prod.yml up -d --build`, espera el certificado hasta 120 s y, si falla, aplica el respaldo DuckDNS (actualiza `APP_DOMAIN` y repite `up -d`); si tampoco emite, muestra `docker logs` del proxy.
     - Añadir a la sección despliegue de `docs/aws/runbook.md` los comandos de verificación: certificado de Let's Encrypt vigente, redirección HTTP→HTTPS (`curl -I http://<dominio>`) y `curl -sI https://<dominio>` con las cinco cabeceras y 0 `Server`.
     - _RF-06.8, RF-03.4 (E1), RF-04.5 · CA-13, CA-23 · Requirements: 4.4, 5.6, 19.3, 19.4, 19.5, 19.6, 19.7_

@@ -1,4 +1,7 @@
 .env
+# Copias y temporales con secretos de scripts/aws/make_env.sh
+.env.bak-*
+.env.tmp.*
 __pycache__/
 .venv/
 node_modules

@@ -266,6 +266,30 @@
         "chatSessionId": "sess_b93b78ff-12bb-421b-9511-a2a2f3fb2805",
         "timestamp": 1795715308269
       }
+    ],
+    "6.2 T-17: Plantilla `.env` de producción y generación de secretos": [
+      {
+        "executionId": "94108408-4595-476a-958a-f72f11c968ca",
+        "chatSessionId": "sess_a159940a-ce97-45e7-90e4-885347681090",
+        "timestamp": 1795716963972
+      },
+      {
+        "executionId": "94108408-4595-476a-958a-f72f11c968ca",
+        "chatSessionId": "sess_a159940a-ce97-45e7-90e4-885347681090",
+        "timestamp": 1795717338889
+      }
+    ],
+    "6.3 T-18: Despliegue con HTTPS válido": [
+      {
+        "executionId": "256cd3f2-72eb-4f3e-b810-7a792e943140",
+        "chatSessionId": "sess_f626a5a9-c3c3-4a9a-95db-3ab0166bbb99",
+        "timestamp": 1795718394191
+      },
+      {
+        "executionId": "256cd3f2-72eb-4f3e-b810-7a792e943140",
+        "chatSessionId": "sess_f626a5a9-c3c3-4a9a-95db-3ab0166bbb99",
+        "timestamp": 1795718854060
+      }
     ]
   }
 }

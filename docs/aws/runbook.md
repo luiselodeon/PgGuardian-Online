@@ -2911,7 +2911,342 @@ Un criterio nunca se da por aprobado con un bloque en `no_aprobado` o `no_verifi
 
 ## 5. Despliegue
 
-Pendiente: tarea 6.3 (certificado de Let's Encrypt, redirección HTTP→HTTPS y cabeceras de seguridad).
+### 5.1 Traer el código a la Instancia (modifica: clona el repositorio)
+
+Trazabilidad: componente C14 del diseño · T-17 (precondición de `make_env.sh`) · R19.2 y R10.2.
+
+Todo se ejecuta en la Instancia, en una sesión de Session Manager (3.9.2) como `ubuntu`. Session Manager abre `sh` como `ssm-user`; se cambia a `ubuntu` con bash:
+
+```sh
+sudo -iu ubuntu bash
+```
+
+El repositorio queda en `/home/ubuntu/PgGuardian-Online`, el mismo `APP_DIR` de las secciones 4 y 6. Primero se fija la rama:
+
+```bash
+RAMA=e2-fase4
+```
+
+Por ahora el código del Entregable 2 está en la rama `e2-fase4`. Cuando se fusionen las PR, se usa `RAMA=master`. Si la sesión se cierra, hay que volver a definir la variable.
+
+Hay dos variantes. La variante usada se anota en `docs/aws/decision-log.md`.
+
+#### Variante A: repositorio público
+
+```bash
+git clone -b "$RAMA" https://github.com/luiselodeon/PgGuardian-Online.git ~/PgGuardian-Online
+```
+
+#### Variante B: repositorio privado, con deploy key de solo lectura
+
+La deploy key da acceso solo a este repositorio y sin escritura. No se guardan tokens personales en la Instancia.
+
+1. Generar el par de claves en la Instancia (sin contraseña, porque no hay quien la escriba en un `git pull`) y mostrar la pública:
+
+   ```bash
+   mkdir -p ~/.ssh && chmod 700 ~/.ssh
+   ssh-keygen -t ed25519 -C "pgguardian-ec2-deploy" -f ~/.ssh/pgguardian_deploy -N ""
+   cat ~/.ssh/pgguardian_deploy.pub
+   ```
+
+2. En GitHub: repositorio → Settings → Deploy keys → Add deploy key. Poner un título (por ejemplo `pgguardian-ec2-deploy`), pegar la clave pública y dejar **sin marcar** «Allow write access».
+
+3. Indicar a SSH que use esa clave para el repositorio:
+
+   ```bash
+   cat >> ~/.ssh/config <<'EOF'
+   Host github-pgguardian
+     HostName github.com
+     User git
+     IdentityFile ~/.ssh/pgguardian_deploy
+     IdentitiesOnly yes
+   EOF
+   chmod 600 ~/.ssh/config
+   ```
+
+4. Registrar la clave del servidor de GitHub y comprobar la conexión:
+
+   ```bash
+   ssh-keyscan -t ed25519 github.com >> ~/.ssh/known_hosts
+   ssh-keygen -lf ~/.ssh/known_hosts
+   ssh -T github-pgguardian
+   ```
+
+   La huella que muestra `ssh-keygen -lf` debe coincidir con la que GitHub publica para ed25519: `SHA256:+DiY3wvvV6TuJJhbpZisF/zLDA0zPMSvHdkr4UvCOqU` (se confirma en la documentación de GitHub, «GitHub's SSH key fingerprints»). Si no coincide, se borra la línea de `known_hosts` y no se continúa. `ssh -T` debe responder que la autenticación fue correcta y que GitHub no ofrece acceso a shell. El código de salida 1 es normal.
+
+5. Clonar:
+
+   ```bash
+   git clone -b "$RAMA" git@github-pgguardian:luiselodeon/PgGuardian-Online.git ~/PgGuardian-Online
+   ```
+
+6. Revocar la deploy key. Se hace al terminar el Entregable o si la Instancia se compromete:
+   - En GitHub: repositorio → Settings → Deploy keys → Delete.
+   - En la Instancia:
+
+     ```bash
+     rm ~/.ssh/pgguardian_deploy ~/.ssh/pgguardian_deploy.pub
+     ```
+
+     Después se quita el bloque `Host github-pgguardian` de `~/.ssh/config`.
+
+#### Comprobación
+
+```bash
+cd ~/PgGuardian-Online && git rev-parse --abbrev-ref HEAD && git log -1 --oneline
+```
+
+La primera línea debe ser la rama definida en `RAMA`. Para cambiar de rama más adelante:
+
+```bash
+cd ~/PgGuardian-Online && git fetch origin && git checkout "$RAMA" && git pull --ff-only
+```
+
+Siguiente paso: generar el `.env` con `bash scripts/aws/make_env.sh <AppDomain>` (T-17).
+
+### 5.2 Despliegue con `deploy.sh` (T-18, modifica: construye y levanta los contenedores)
+
+Trazabilidad: componentes C2 y C8 del diseño · T-18 · RF-06.8, RF-03.4 (E1), RF-04.5 · CA-13, CA-23 · R4.4, R5.6, R19.3 a R19.7.
+
+Condiciones:
+
+| Condición | Requisito | Verificación |
+| --- | --- | --- |
+| El despliegue no arranca si `SANDBOX_DATA_DIR` falta o difiere de `/srv/sandbox/pgdata` en el `.env` | R4.4 | `deploy.sh`, paso 1; después 4.4 |
+| Caddy obtiene un certificado de Let's Encrypt en ≤ 120 s desde que el proxy está en ejecución | R19.3 | `deploy.sh`, paso 4; 5.3.1 |
+| Si `sslip.io` no emite, se pasa a un subdominio de DuckDNS y se repite el despliegue | R19.4 | `deploy.sh --duckdns`; 5.2.2 |
+| El navegador muestra un certificado de Let's Encrypt vigente para el dominio, sin advertencias | R19.5 | 5.3.1 |
+| `http://<dominio>` redirige a `https://<dominio>` | R19.6 | 5.3.2 |
+| Sin certificado, Caddy no sirve la aplicación por HTTP en claro y el error queda en los logs del proxy | R19.7 | `deploy.sh`, paso 6; 5.2.3 |
+| `curl -sI https://<dominio>` devuelve las cinco cabeceras de seguridad, cada una una vez, y 0 cabeceras `Server` | R5.6, R5.1 | 5.3.3 |
+
+Las líneas «Resultado de verificación» de las secciones 5.2 y 5.3 se guardan en `docs/aws/evidencia/despliegue/verificacion-despliegue.jsonl`.
+
+#### 5.2.1 Ejecución
+
+En la Instancia, como `ubuntu` (5.1), con el `.env` ya generado por `make_env.sh`:
+
+```bash
+cd ~/PgGuardian-Online
+bash scripts/aws/deploy.sh 2>&1 | tee ~/deploy-$(date -u +%Y%m%dT%H%MZ).log
+```
+
+Pasos del script, con un mensaje por paso:
+
+1. Precondiciones: `.env` con permisos `600`; `SANDBOX_DATA_DIR` exactamente una vez e igual a `/srv/sandbox/pgdata` (si falta o difiere, se detiene **antes** de `up`); `/srv/sandbox` montado y `/srv/sandbox/pgdata` existente; `JWT_SECRET` no vacío; `APP_DOMAIN` con forma `<a-b-c-d>.sslip.io` o `<nombre>.duckdns.org`; Docker y Compose disponibles. Si el grupo `docker` todavía no aplica a la sesión, usa `sudo docker`.
+2. `docker compose config -q`.
+3. `docker compose -f docker-compose.prod.yml up -d --build`.
+4. Espera del certificado, hasta 120 s. Cada 5 s hace un `curl` con verificación TLS a `https://<dominio>/` resuelto a `127.0.0.1` y comprueba con `openssl` que el emisor es Let's Encrypt.
+5. Respaldo DuckDNS, solo si el paso 4 falla y se pasó `--duckdns` (5.2.2).
+6. Si no hay certificado: muestra `docker logs --tail 80 pgguardian_proxy`, informa el código HTTP del puerto 80 y sale con código 1.
+7. Resumen: URL, emisor, fecha de vencimiento, respuesta del puerto 80 y salida de `/api/health-check`.
+
+Resultado esperado: el script termina con `deploy.sh terminó sin errores.` y el resumen muestra un emisor de Let's Encrypt (`O = Let's Encrypt`), un `308 https://<dominio>/` para el puerto 80 y `{"status":"ok"}`. El log se copia a `docs/aws/evidencia/despliegue/`. Después se ejecutan 4.4 y 5.3.
+
+Mensajes de error frecuentes:
+
+| Mensaje | Causa | Corrección |
+| --- | --- | --- |
+| `SANDBOX_DATA_DIR falta en ...` o `SANDBOX_DATA_DIR=... (se esperaba /srv/sandbox/pgdata)` | `.env` incompleto o editado a mano | Volver a generarlo con `make_env.sh --force` (tarea 6.2) y repetir. No se levantó ningún contenedor. |
+| `/srv/sandbox no está montado` o `no existe /srv/sandbox/pgdata` | El host no está configurado o el Volumen_Sandbox no está adjunto | Repetir 4.1 y 4.3. |
+| `tiene permisos 644 (se esperaba 600)` | Permisos cambiados | `chmod 600 ~/PgGuardian-Online/.env` |
+| `no se puede usar docker` | El servicio `docker` está parado o falta `sudo` sin contraseña | `sudo systemctl start docker`, o abrir una sesión nueva como `ubuntu`. |
+| `no se obtuvo certificado para <a-b-c-d>.sslip.io` | Let's Encrypt rechazó la solicitud o no terminó en 120 s (por ejemplo, por el límite de certificados del dominio compartido `sslip.io`) | Leer los logs que muestra el script y aplicar 5.2.2. |
+
+#### 5.2.2 Respaldo DuckDNS (R19.4, modifica: registro DNS y `.env`)
+
+Solo si 5.2.1 no obtuvo certificado para `sslip.io`.
+
+1. En <https://www.duckdns.org>, iniciar sesión, crear un subdominio (por ejemplo `pgguardian-equipo`) y copiar el token de la cuenta. El token no se guarda en el repositorio, en el `.env` ni en el historial de la shell.
+2. En la Instancia:
+
+   ```bash
+   cd ~/PgGuardian-Online
+   read -rs DUCKDNS_TOKEN && export DUCKDNS_TOKEN   # pegar el token; no se muestra
+   bash scripts/aws/deploy.sh --duckdns pgguardian-equipo.duckdns.org 2>&1 | tee ~/deploy-duckdns-$(date -u +%Y%m%dT%H%MZ).log
+   unset DUCKDNS_TOKEN
+   ```
+
+El script vuelve a intentar primero el dominio actual del `.env` durante 120 s. Si sigue sin certificado:
+
+- Actualiza el registro de DuckDNS a la Elastic IP (tomada del dominio `sslip.io` o, si no, de IMDSv2). El token se pasa a `curl` por la entrada estándar, así que no aparece en la lista de procesos.
+- Espera hasta 120 s a que el subdominio resuelva a la Elastic IP.
+- Guarda una copia del `.env` (`.env.bak-<fecha>`, permisos `600`) y cambia `APP_DOMAIN`, `VITE_API_URL` y `CORS_ORIGINS` al subdominio.
+- Repite `up -d --build`. El `--build` hace falta porque `VITE_API_URL` se compila dentro del frontend. Después espera otros 120 s el certificado.
+
+Si `APP_DOMAIN` ya es el subdominio de DuckDNS (por ejemplo, en un despliegue posterior), el script no vuelve a tocar DuckDNS y solo espera el certificado. Anotar en `docs/aws/decision-log.md` que se usó el respaldo y el subdominio elegido. Las secciones 5.3 y 6 usan entonces ese subdominio como `DOMINIO`.
+
+#### 5.2.3 Sin certificado tras el respaldo (R19.7)
+
+El script sale con `no se obtuvo certificado tampoco para <nombre>.duckdns.org`, muestra los logs del proxy e informa el código HTTP del puerto 80. Caddy no sirve la aplicación por HTTP en claro mientras `APP_DOMAIN` sea un nombre de dominio: el puerto 80 solo responde con la redirección a HTTPS (y con el reto HTTP-01 de ACME), y HTTPS falla el handshake. Se registra el error:
+
+```bash
+sudo docker logs pgguardian_proxy 2>&1 | grep -Ei 'error|obtain|challenge|rate' | tail -n 40 \
+  > ~/caddy-error-$(date -u +%Y%m%dT%H%MZ).log
+```
+
+Ese archivo se copia a `docs/aws/evidencia/despliegue/` y se anota una línea `no_aprobado` para R19.3 con el mensaje de Let's Encrypt en `detalle`. No se cambia a `APP_DOMAIN=:80` en producción.
+
+### 5.3 Verificación de HTTPS y cabeceras (CA-13, CA-23)
+
+Se ejecuta en **CloudShell**, fuera de la VPC, para probar el dominio público como lo ve un usuario. CloudShell trae `curl`, `openssl` y `jq`. Primero se define el dominio:
+
+```bash
+DOMINIO=$(aws cloudformation describe-stacks --stack-name pgguardian \
+  --query "Stacks[0].Outputs[?OutputKey=='AppDomain'].OutputValue" --output text)
+# Si se usó el respaldo de 5.2.2: DOMINIO=<nombre>.duckdns.org
+echo "$DOMINIO"
+```
+
+#### 5.3.1 Certificado de Let's Encrypt vigente (R19.3, R19.5)
+
+Consulta directa:
+
+```bash
+openssl s_client -connect "$DOMINIO:443" -servername "$DOMINIO" -verify_hostname "$DOMINIO" </dev/null 2>/dev/null \
+  | openssl x509 -noout -subject -issuer -startdate -enddate -ext subjectAltName
+```
+
+Resultado esperado: `issuer` con `O = Let's Encrypt`, `notAfter` en el futuro y `subjectAltName` con `DNS:<dominio>`.
+
+Evaluación automática del criterio:
+
+```bash
+(
+  criterio="CA-23"; requisito="R19.3, R19.5"
+  salida=$(openssl s_client -connect "$DOMINIO:443" -servername "$DOMINIO" \
+    -verify_hostname "$DOMINIO" -verify_return_error </dev/null 2>&1)
+  rc=$?
+  cert=$(printf '%s\n' "$salida" | openssl x509 2>/dev/null)
+  if [ -z "$cert" ]; then
+    estado="no_verificable"; detalle="no se obtuvo certificado de $DOMINIO:443 (openssl rc=$rc): $(printf '%s\n' "$salida" | grep -m1 -Ei 'error|refused|timeout' || echo sin detalle)"
+  else
+    emisor=$(openssl x509 -noout -issuer <<< "$cert")
+    vence=$(openssl x509 -noout -enddate <<< "$cert" | cut -d= -f2)
+    san=$(openssl x509 -noout -ext subjectAltName <<< "$cert" | tail -n +2 | tr -d ' ')
+    verif=$(printf '%s\n' "$salida" | sed -n 's/^ *Verify return code: //p' | tail -n1)
+    fallos=()
+    [ "$rc" -eq 0 ] && [ "$verif" = "0 (ok)" ] || fallos+=("verificación de cadena/nombre: ${verif:-?} (rc=$rc)")
+    [[ "$emisor" == *"Let's Encrypt"* ]] || fallos+=("emisor '$emisor' no es Let's Encrypt")
+    openssl x509 -noout -checkend 0 <<< "$cert" >/dev/null || fallos+=("certificado vencido ($vence)")
+    tr ',' '\n' <<< "$san" | grep -qx "DNS:$DOMINIO" || fallos+=("SAN '$san' no incluye $DOMINIO")
+    curl -sS -o /dev/null -m 10 "https://$DOMINIO/" 2>/dev/null || fallos+=("curl rechaza el certificado")
+    if [ ${#fallos[@]} -eq 0 ]; then
+      estado="aprobado"; detalle="$DOMINIO: ${emisor#issuer=}; vence $vence; SAN $san; Verify return code 0 (ok)"
+    else
+      estado="no_aprobado"; detalle="no conforme: $(printf '%s; ' "${fallos[@]}" | sed 's/; $//')"
+    fi
+  fi
+  jq -cn --arg c "$criterio" --arg r "$requisito" --arg e "$estado" --arg d "$detalle" \
+    '{criterio: $c, requisito: $r, estado: $e, detalle: $d}'
+)
+```
+
+Paso manual (R19.5): abrir `https://<dominio>` en un navegador, comprobar que no hay advertencias de seguridad y que el visor del certificado muestra el emisor Let's Encrypt, la fecha de vencimiento y el dominio. Se guarda una captura en `docs/aws/evidencia/despliegue/` y se anota una línea `CA-23` / `R19.5` en `aprobado` o `no_aprobado`.
+
+El tiempo de emisión (≤ 120 s, R19.3) lo mide `deploy.sh` en el paso 4 (`certificado obtenido para <dominio> en N s`). Se copia ese valor al `detalle` de la línea anterior desde el log de 5.2.1.
+
+#### 5.3.2 Redirección HTTP→HTTPS (R19.6)
+
+Consulta directa:
+
+```bash
+curl -I "http://$DOMINIO/"
+```
+
+Resultado esperado: `HTTP/1.1 308 Permanent Redirect` y `Location: https://<dominio>/`.
+
+Evaluación automática del criterio:
+
+```bash
+(
+  criterio="CA-23"; requisito="R19.6"
+  cab=$(curl -sI -m 10 "http://$DOMINIO/" | tr -d '\r')
+  if [ -z "$cab" ]; then
+    estado="no_verificable"; detalle="sin respuesta de http://$DOMINIO/ (puerto 80)"
+  else
+    codigo=$(head -n1 <<< "$cab" | awk '{print $2}')
+    destino=$(sed -n 's/^[Ll]ocation: *//p' <<< "$cab")
+    if [[ "$codigo" =~ ^30[178]$ ]] && [ "$destino" = "https://$DOMINIO/" ]; then
+      estado="aprobado"; detalle="http://$DOMINIO/ -> $codigo $destino"
+    else
+      estado="no_aprobado"; detalle="no conforme: código ${codigo:-?}, Location '${destino:-ausente}' (se esperaba 301/307/308 a https://$DOMINIO/)"
+    fi
+  fi
+  jq -cn --arg c "$criterio" --arg r "$requisito" --arg e "$estado" --arg d "$detalle" \
+    '{criterio: $c, requisito: $r, estado: $e, detalle: $d}'
+)
+```
+
+#### 5.3.3 Cabeceras de seguridad y sin `Server` (CA-13 · R5.1, R5.2, R5.6)
+
+Consulta directa:
+
+```bash
+curl -sI "https://$DOMINIO"
+```
+
+Resultado esperado, cada una exactamente una vez y ninguna línea `Server:`:
+
+| Cabecera | Valor |
+| --- | --- |
+| `Strict-Transport-Security` | `max-age=31536000; includeSubDomains` |
+| `X-Content-Type-Options` | `nosniff` |
+| `X-Frame-Options` | `DENY` |
+| `Referrer-Policy` | `strict-origin-when-cross-origin` |
+| `Content-Security-Policy` | El valor del `Caddyfile`: la CSP inicial de R5.3 ampliada en T-06 con Google Fonts (`docs/aws/csp-verificacion.md`) |
+
+Evaluación automática del criterio. Revisa la página principal (respuesta del frontend) y una ruta inexistente de la API (respuesta 404 del upstream), para cubrir también códigos de error (R5.1). Si la CSP del `Caddyfile` cambia, se actualiza `CSP_ESPERADA` con el mismo valor:
+
+```bash
+(
+  criterio="CA-13"; requisito="R5.1, R5.2, R5.6"
+  CSP_ESPERADA="default-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data:; frame-ancestors 'none'"
+  declare -A esperado=(
+    [strict-transport-security]="max-age=31536000; includeSubDomains"
+    [x-content-type-options]="nosniff"
+    [x-frame-options]="DENY"
+    [referrer-policy]="strict-origin-when-cross-origin"
+    [content-security-policy]="$CSP_ESPERADA"
+  )
+  fallos=(); observado=(); sin_respuesta=()
+  for ruta in / /api/no-existe; do
+    cab=$(curl -sI -m 10 "https://$DOMINIO$ruta" | tr -d '\r')
+    if [ -z "$cab" ]; then sin_respuesta+=("$ruta"); continue; fi
+    codigo=$(head -n1 <<< "$cab" | awk '{print $2}')
+    observado+=("$ruta=$codigo")
+    for nombre in "${!esperado[@]}"; do
+      n=$(grep -ci "^$nombre:" <<< "$cab")
+      valor=$(grep -i "^$nombre:" <<< "$cab" | head -n1 | cut -d: -f2- | sed 's/^ *//')
+      [ "$n" -eq 1 ] || fallos+=("$ruta: $nombre aparece $n veces")
+      [ "$n" -eq 0 ] || [ "$valor" = "${esperado[$nombre]}" ] || fallos+=("$ruta: $nombre='$valor'")
+    done
+    ns=$(grep -ci '^server:' <<< "$cab")
+    [ "$ns" -eq 0 ] || fallos+=("$ruta: $ns cabecera(s) Server")
+  done
+  if [ ${#sin_respuesta[@]} -gt 0 ]; then
+    estado="no_verificable"; detalle="sin respuesta HTTPS en: ${sin_respuesta[*]}"
+  elif [ ${#fallos[@]} -eq 0 ]; then
+    estado="aprobado"; detalle="$DOMINIO (${observado[*]}): 5 cabeceras con el valor esperado, una vez cada una; 0 Server"
+  else
+    estado="no_aprobado"; detalle="no conforme (${observado[*]}): $(printf '%s; ' "${fallos[@]}" | sed 's/; $//')"
+  fi
+  jq -cn --arg c "$criterio" --arg r "$requisito" --arg e "$estado" --arg d "$detalle" \
+    '{criterio: $c, requisito: $r, estado: $e, detalle: $d}'
+)
+```
+
+Corrección ante `no_aprobado`: una cabecera duplicada indica que falta el prefijo `>` en el `Caddyfile`; una cabecera `Server` indica que falta `-Server`; un valor distinto, que el `Caddyfile` desplegado no es el del repositorio. Se corrige el `Caddyfile`, se ejecuta `sudo docker restart pgguardian_proxy` en la Instancia y se repite 5.3.3. La verificación de CSP en el navegador (R5.4, 0 violaciones) está en `docs/aws/csp-verificacion.md`.
+
+### 5.4 Resumen de la sección 5
+
+| Criterio | Bloques que deben estar en `aprobado` | Partes en otras secciones |
+| --- | --- | --- |
+| CA-13 | 5.3.3 | `docs/aws/csp-verificacion.md` (R5.4, R5.5) |
+| CA-23 | 5.2.1 (certificado en ≤ 120 s), 5.3.1 (automático y manual), 5.3.2 | 3.8 (Elastic IP), 4.7.2, sección 6 (R19.8) |
+| CA-12 | `deploy.sh` no despliega sin `SANDBOX_DATA_DIR=/srv/sandbox/pgdata` | 4.4 |
+
+Un criterio nunca se da por aprobado con un bloque en `no_aprobado` o `no_verificable`: se corrige la causa y se repite el bloque, conservando la línea anterior en la evidencia.
 
 ## 6. Encender y detener
 
