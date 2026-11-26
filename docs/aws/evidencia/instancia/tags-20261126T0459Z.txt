@@ -1,0 +1,16 @@
+-----------------------------------------------------------------------
+|                            DescribeTags                             |
++------------+------------------------------+----------+--------------+
+|  volume    |  vol-0b1efc51a5925d766       |  Env     |  prod        |
+|  volume    |  vol-0b1efc51a5925d766       |  Owner   |  Chus Avila  |
+|  volume    |  vol-0b1efc51a5925d766       |  Project |  PgGuardian  |
+|  volume    |  vol-0ce09703b3674e7ac       |  Env     |  prod        |
+|  volume    |  vol-0ce09703b3674e7ac       |  Owner   |  Chus Avila  |
+|  volume    |  vol-0ce09703b3674e7ac       |  Project |  PgGuardian  |
+|  elastic-ip|  eipalloc-07f5c0970b8b58662  |  Env     |  prod        |
+|  elastic-ip|  eipalloc-07f5c0970b8b58662  |  Owner   |  Chus Avila  |
+|  elastic-ip|  eipalloc-07f5c0970b8b58662  |  Project |  PgGuardian  |
+|  instance  |  i-06ed7dab83c04f8bb         |  Env     |  prod        |
+|  instance  |  i-06ed7dab83c04f8bb         |  Owner   |  Chus Avila  |
+|  instance  |  i-06ed7dab83c04f8bb         |  Project |  PgGuardian  |
++------------+------------------------------+----------+--------------+

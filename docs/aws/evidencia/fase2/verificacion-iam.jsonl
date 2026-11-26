@@ -2,9 +2,25 @@
 {"criterio":"CA-15","requisito":"R9.1, R9.4, R9.5","estado":"no_aprobado","detalle":"no conforme: 3 de 4 usuarios: david.ceballos: mfa_active=false; emiliano.cabanas: mfa_active=false; luis.arias: mfa_active=false"}
 {"criterio":"CA-16","requisito":"R9.2, R9.3","estado":"aprobado","detalle":"PgG-Admins con AdministratorAccess y Force_MFA (arn:aws:iam::<cuenta>:policy/Force_MFA, versión v1); Deny con NotAction de 10 acciones de autogestión y BoolIfExists aws:MultiFactorAuthPresent=false; Allow limitado a ${aws:username}; miembros: david.ceballos,luis.arias,emiliano.cabanas,jesus.avila"}
 {"criterio":"CA-16","requisito":"R9.6","estado":"aprobado","detalle":"arn:aws:iam::<cuenta>:user/jesus.avila ejecutó ec2:DescribeRegions con MFA sin AccessDenied (18 regiones)"}
-
 {"criterio":"CA-15","requisito":"R8.3","estado":"aprobado","detalle":"IAM access to billing activado; jesus.avila abre Billing and Cost Management sin acceso denegado (captura 2026-11-25)"}
 {"criterio":"CA-17","requisito":"R10.3","estado":"aprobado","detalle":"i-06ed7dab83c04f8bb Online en Systems Manager (Ubuntu 24.04) tras CREATE_COMPLETE, 2026-11-26"}
 {"criterio":"CA-17","requisito":"R10.2","estado":"aprobado","detalle":"la instancia i-06ed7dab83c04f8bb usa arn:aws:iam::<cuenta>:instance-profile/PgGuardian-EC2-Role, asociado a PgGuardian-EC2-Role"}
 {"criterio":"CA-17","requisito":"R10.2","estado":"aprobado","detalle":"credenciales temporales de PgGuardian-EC2-Role por IMDS (AWS-HMAC expira 2026-11-26T10:23:05Z); sin claves de acceso en /etc /root /home /opt /srv"}
 {"criterio":"CA-17","requisito":"R10.1","estado":"aprobado","detalle":"PgGuardian-EC2-Role tiene adjuntas: [\"arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore\"]"}
+{"criterio":"CA-18","requisito":"R11.1, R12.1, R12.2","estado":"aprobado","detalle":"sg-0f371ca82fd1e0165: 2 reglas de entrada (tcp/80 y tcp/443 desde 0.0.0.0/0); 0 para TCP/22; 0 IPv6"}
+{"criterio":"CA-18","requisito":"R12.4","estado":"aprobado","detalle":"3.14.31.64: sin conexión (tiempo agotado o rechazo) en TCP 22 5432 8000 3389"}
+{"criterio":"CA-19","requisito":"R13.1","estado":"aprobado","detalle":"i-06ed7dab83c04f8bb: HttpTokens=required, HttpEndpoint=enabled, HttpPutResponseHopLimit=1"}
+{"criterio":"CA-20","requisito":"R16.1, R16.3, R16.4","estado":"aprobado","detalle":"disableApiTermination=true; terminate-instances rechazado con OperationNotPermitted; estado running -> running"}
+{"criterio":"CA-17","requisito":"R10.3, R10.4","estado":"aprobado","detalle":"i-06ed7dab83c04f8bb Online en Systems Manager a los 1 s de comprobar running"}
+{"criterio":"CA-19","requisito":"R13.2, R13.3, R13.4","estado":"aprobado","detalle":"sin token 401; token válido 200 (24 categorías); token inválido 401; token expirado 401; sin metadatos en las respuestas 401"}
+{"criterio":"CA-20","requisito":"R14.1, R14.2, R14.5","estado":"aprobado","detalle":"raíz vol-0b1efc51a5925d766 gp3 20 GB cifrado; sandbox vol-0ce09703b3674e7ac gp3 8 GB cifrado en /dev/sdf; 0 volúmenes sin cifrar"}
+{"criterio":"CA-21","requisito":"R17.1, R17.2, R17.3","estado":"aprobado","detalle":"instancia, disco raíz, Volumen_Sandbox y Elastic IP con Project=PgGuardian, Env=prod y Owner=Chus Avila"}
+{"criterio":"CA-23","requisito":"R19.1 (antes de detener e iniciar)","estado":"aprobado","detalle":"i-06ed7dab83c04f8bb running con IP pública 3.14.31.64 = Elastic IP eipalloc-07f5c0970b8b58662 asociada a la instancia"}
+{"criterio":"CA-23","requisito":"R19.1 (después de detener e iniciar)","estado":"aprobado","detalle":"i-06ed7dab83c04f8bb stopped -> running con IP pública 3.14.31.64 = PublicIp del stack (eipalloc-07f5c0970b8b58662 sigue asociada); SSM Online tras el arranque"}
+{"criterio":"sin CA","requisito":"R29.6","estado":"aprobado","detalle":"cfn-lint código 0 sin errores; validate-template sin errores, 6 parámetros"}
+{"criterio":"sin CA","requisito":"R21.1 (comprobación previa al primer despliegue)","estado":"aprobado","detalle":"la cuenta no tiene monitores DIMENSIONAL; el stack puede crear CostAnomalyMonitor"}
+{"criterio":"sin CA","requisito":"R29.7 (change set CREATE, primer intento)","estado":"aprobado","detalle":"change set pgguardian-20261126-0308: 11 recursos, todos Add; revisado por Chus Avila"}
+{"criterio":"sin CA","requisito":"R29.7 (primer intento)","estado":"no_aprobado","detalle":"stack en ROLLBACK_COMPLETE: AppSecurityGroup rechazado por EC2 (apóstrofo en la descripción de la regla de salida); stack borrado sin recursos creados; plantilla corregida y redesplegada"}
+{"criterio":"sin CA","requisito":"R29.7 (change set CREATE, segundo intento)","estado":"aprobado","detalle":"change set pgguardian-20261126-0318: 11 recursos, todos Add; revisado por Chus Avila"}
+{"criterio":"sin CA","requisito":"R29.8","estado":"aprobado","detalle":"StackStatus=CREATE_COMPLETE, EnableTerminationProtection=True"}
+{"criterio":"sin CA","requisito":"R29.3","estado":"aprobado","detalle":"InstanceId=i-06ed7dab83c04f8bb, PublicIp=3.14.31.64, AppDomain=3-14-31-64.sslip.io, SandboxVolumeId=vol-0ce09703b3674e7ac"}
