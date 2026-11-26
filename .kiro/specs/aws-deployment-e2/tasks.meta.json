@@ -309,6 +309,85 @@
         "chatSessionId": "sess_40fa9c5c-5ec6-4eee-8a9e-c07c5e624431",
         "timestamp": 1795720233719
       }
+    ],
+    "7.1 T-19: Verificación del presupuesto mensual de 30 USD": [
+      {
+        "executionId": "b8069d96-affe-4a51-889f-30425e98bdeb",
+        "chatSessionId": "sess_523ea3e4-350d-48c5-a820-5e4209ed59bf",
+        "timestamp": 1795725640878
+      },
+      {
+        "executionId": "b8069d96-affe-4a51-889f-30425e98bdeb",
+        "chatSessionId": "sess_523ea3e4-350d-48c5-a820-5e4209ed59bf",
+        "timestamp": 1795726088637
+      }
+    ],
+    "7.2 T-20: Verificación de Cost Anomaly Detection": [
+      {
+        "executionId": "b8069d96-affe-4a51-889f-30425e98bdeb",
+        "chatSessionId": "sess_523ea3e4-350d-48c5-a820-5e4209ed59bf",
+        "timestamp": 1795726089579
+      },
+      {
+        "executionId": "b8069d96-affe-4a51-889f-30425e98bdeb",
+        "chatSessionId": "sess_523ea3e4-350d-48c5-a820-5e4209ed59bf",
+        "timestamp": 1795726504652
+      }
+    ],
+    "7.3 T-21: Verificación de la alarma de recuperación automática": [
+      {
+        "executionId": "b8069d96-affe-4a51-889f-30425e98bdeb",
+        "chatSessionId": "sess_523ea3e4-350d-48c5-a820-5e4209ed59bf",
+        "timestamp": 1795726505552
+      },
+      {
+        "executionId": "b8069d96-affe-4a51-889f-30425e98bdeb",
+        "chatSessionId": "sess_523ea3e4-350d-48c5-a820-5e4209ed59bf",
+        "timestamp": 1795727006540
+      }
+    ],
+    "7.4 T-22: Snapshots manuales de estabilización": [
+      {
+        "executionId": "b8069d96-affe-4a51-889f-30425e98bdeb",
+        "chatSessionId": "sess_523ea3e4-350d-48c5-a820-5e4209ed59bf",
+        "timestamp": 1795727005386
+      },
+      {
+        "executionId": "b8069d96-affe-4a51-889f-30425e98bdeb",
+        "chatSessionId": "sess_523ea3e4-350d-48c5-a820-5e4209ed59bf",
+        "timestamp": 1795727589840
+      }
+    ],
+    "7.5 T-27: Snapshots manuales previos a la grabación del video": [
+      {
+        "executionId": "b8069d96-affe-4a51-889f-30425e98bdeb",
+        "chatSessionId": "sess_523ea3e4-350d-48c5-a820-5e4209ed59bf",
+        "timestamp": 1795727588783
+      },
+      {
+        "executionId": "b8069d96-affe-4a51-889f-30425e98bdeb",
+        "chatSessionId": "sess_523ea3e4-350d-48c5-a820-5e4209ed59bf",
+        "timestamp": 1795727960442
+      }
+    ],
+    "7.6 Secreto huérfano de Secrets Manager (sin T-xx; ejecución manual por el Equipo)": [
+      {
+        "executionId": "b8069d96-affe-4a51-889f-30425e98bdeb",
+        "chatSessionId": "sess_523ea3e4-350d-48c5-a820-5e4209ed59bf",
+        "timestamp": 1795727961597
+      },
+      {
+        "executionId": "b8069d96-affe-4a51-889f-30425e98bdeb",
+        "chatSessionId": "sess_523ea3e4-350d-48c5-a820-5e4209ed59bf",
+        "timestamp": 1795728264109
+      }
+    ],
+    "7. Fase 5: costos y resiliencia (T-19 a T-22, T-27 y secreto huérfano)": [
+      {
+        "executionId": "b8069d96-affe-4a51-889f-30425e98bdeb",
+        "chatSessionId": "sess_523ea3e4-350d-48c5-a820-5e4209ed59bf",
+        "timestamp": 1795728264239
+      }
     ]
   }
 }

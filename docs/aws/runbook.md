@@ -3443,8 +3443,1722 @@ R24.3 (sustitución de RF-03.6) queda respaldado por 6.3 en `aprobado` junto con
 
 ## 7. Costos
 
-Pendiente: tarea 7.1 (presupuesto mensual), tarea 7.2 (Cost Anomaly Detection) y tarea 7.6 (secreto huérfano de Secrets Manager).
+Trazabilidad: componentes C10 y C15 del diseño · RF-07.1, RF-07.2 · CA-24 · R20, R21, R27 y R29.10 · T-19, T-20 (R27 sin T-xx).
+
+Las líneas «Resultado de verificación» de esta sección se guardan en `docs/aws/evidencia/costos/verificacion-costos.jsonl` (p. ej. terminando el bloque con `| tee -a docs/aws/evidencia/costos/verificacion-costos.jsonl`). Para consultar AWS Budgets y Cost Anomaly Detection, el Usuario_IAM necesita el acceso a la información de facturación activado en 1.1.2.
+
+### 7.1 Presupuesto mensual de 30 USD (T-19 · RF-07.1 · CA-24 · R20)
+
+El presupuesto lo crea la plantilla: recurso `MonthlyBudget` (`AWS::Budgets::Budget`) con el nombre `PgGuardian-Mensual`, el monto del parámetro `MonthlyBudgetUsd` y las alertas dirigidas al parámetro `AlertEmail`. Esta sección no crea ni cambia nada; solo lee el presupuesto y lo compara con lo que exige R20. Mide el gasto bruto (`IncludeCredit=false`, `IncludeRefund=false`) porque con los créditos descontados el gasto sería 0 USD y ninguna alerta se dispararía.
+
+Condiciones que debe cumplir el presupuesto:
+
+| Condición | Requisito | Verificación |
+| --- | --- | --- |
+| Existe el presupuesto `PgGuardian-Mensual` | R20.7 | 7.1.2 y 7.1.3 |
+| Monto límite de 30.00 USD, `TimeUnit=MONTHLY` y periodo que empieza el día 1 | R20.1 | 7.1.2 |
+| `BudgetType=COST` (gasto real) | R20.1 | 7.1.2 |
+| `CostTypes` con `IncludeCredit=false` e `IncludeRefund=false` | R20.1 | 7.1.2 |
+| Tres notificaciones de gasto real: 50 %, 80 % y 100 % (`ACTUAL`, `GREATER_THAN`, `PERCENTAGE`) | R20.2 | 7.1.3 |
+| Una notificación de gasto pronosticado: 100 % (`FORECASTED`, `GREATER_THAN`, `PERCENTAGE`) | R20.3 | 7.1.3 |
+| Exactamente 4 notificaciones; si no, se anotan las faltantes y las sobrantes | R20.5, R20.7 | 7.1.3 |
+| Cada notificación tiene de 1 a 5 destinatarios de correo (`EMAIL`), entre ellos `AlertEmail` | R20.4 | 7.1.3 |
+| Al superar un umbral, llega el correo a los destinatarios | R20.6 | 7.1.4 |
+
+Equivalencia de los umbrales con el monto de 30.00 USD: 50 % = 15.00 USD, 80 % = 24.00 USD y 100 % = 30.00 USD.
+
+#### 7.1.1 Preparación en CloudShell
+
+Se ejecuta en CloudShell (`us-east-2`, Usuario_IAM con MFA). AWS Budgets es un servicio global: la CLI lo consulta igual desde cualquier región, pero necesita el ID de la cuenta. El correo de las alertas se lee de los parámetros del stack, para no escribirlo a mano:
+
+```bash
+mkdir -p docs/aws/evidencia/costos
+ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+BUDGET_NAME="PgGuardian-Mensual"
+ALERT_EMAIL=$(aws cloudformation describe-stacks --stack-name pgguardian \
+  --query "Stacks[0].Parameters[?ParameterKey=='AlertEmail'].ParameterValue" --output text)
+echo "cuenta=$ACCOUNT_ID presupuesto=$BUDGET_NAME alertas=$ALERT_EMAIL"
+```
+
+Resultado esperado: un ID de 12 dígitos, `PgGuardian-Mensual` y el correo con el que se creó el stack (2.1.4), ninguno vacío ni `None`. Si la sesión de CloudShell se reinicia, se repite este bloque.
+
+#### 7.1.2 Verificación con `aws budgets describe-budget` (R20.1, R20.7)
+
+Consulta directa, para guardar la salida en la evidencia:
+
+```bash
+aws budgets describe-budget --account-id "$ACCOUNT_ID" --budget-name "$BUDGET_NAME" \
+  --query 'Budget.{BudgetName: BudgetName, BudgetType: BudgetType, TimeUnit: TimeUnit, BudgetLimit: BudgetLimit, TimePeriodStart: TimePeriod.Start, CostTypes: {IncludeCredit: CostTypes.IncludeCredit, IncludeRefund: CostTypes.IncludeRefund}}' \
+  --output json | tee "docs/aws/evidencia/costos/describe-budget-$(date -u +%Y%m%dT%H%MZ).json"
+```
+
+Resultado esperado (la fecha de `TimePeriodStart` depende de cuándo se creó el stack, pero siempre es un día 1):
+
+```json
+{
+    "BudgetName": "PgGuardian-Mensual",
+    "BudgetType": "COST",
+    "TimeUnit": "MONTHLY",
+    "BudgetLimit": {
+        "Amount": "30.0",
+        "Unit": "USD"
+    },
+    "TimePeriodStart": "2026-11-01T00:00:00+00:00",
+    "CostTypes": {
+        "IncludeCredit": false,
+        "IncludeRefund": false
+    }
+}
+```
+
+Evaluación automática del criterio. Pegar el bloque completo en CloudShell después de 7.1.1; imprime una línea con el formato «Resultado de verificación»:
+
+```bash
+(
+  criterio="CA-24"; requisito="R20"
+  if [ -z "${ACCOUNT_ID:-}" ] || [ -z "${BUDGET_NAME:-}" ]; then
+    estado="no_verificable"
+    detalle="faltan ACCOUNT_ID o BUDGET_NAME; ejecutar antes 7.1.1"
+  elif ! salida=$(aws budgets describe-budget --account-id "$ACCOUNT_ID" \
+        --budget-name "$BUDGET_NAME" --output json 2>&1); then
+    if grep -q 'NotFoundException' <<< "$salida"; then
+      estado="no_aprobado"
+      detalle="no conforme: el presupuesto $BUDGET_NAME no existe en la cuenta $ACCOUNT_ID (R20.7)"
+    else
+      estado="no_verificable"
+      detalle="falló aws budgets describe-budget: $(echo "$salida" | tr '\n' ' ')"
+    fi
+  else
+    # false es un valor válido: no se usa el operador // de jq, que lo trataría como ausente.
+    valores=$(jq -r 'def v(f): (f) as $x | if $x == null then "ausente" else ($x | tostring) end;
+      .Budget | [v(.BudgetLimit.Amount), v(.BudgetLimit.Unit), v(.TimeUnit), v(.BudgetType),
+                 v(.CostTypes.IncludeCredit), v(.CostTypes.IncludeRefund), v(.TimePeriod.Start)] | @tsv' <<< "$salida")
+    IFS=$'\t' read -r monto unidad periodo tipo credito reembolso inicio <<< "$valores"
+    ausentes=()
+    for par in "Amount=$monto" "Unit=$unidad" "TimeUnit=$periodo" "BudgetType=$tipo" \
+               "IncludeCredit=$credito" "IncludeRefund=$reembolso" "TimePeriod.Start=$inicio"; do
+      [ "${par#*=}" = "ausente" ] && ausentes+=("${par%%=*}")
+    done
+    if [ ${#ausentes[@]} -gt 0 ]; then
+      estado="no_verificable"
+      detalle="la respuesta no trae: ${ausentes[*]}"
+    elif ! [[ "$inicio" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2} ]]; then
+      estado="no_verificable"
+      detalle="TimePeriod.Start=$inicio no tiene formato de fecha AAAA-MM-DD"
+    else
+      fallos=()
+      jq -en --arg a "$monto" '($a | tonumber) == 30' > /dev/null 2>&1 \
+        || fallos+=("Amount=$monto (se esperaba 30.0)")
+      [ "$unidad" != "USD" ] && fallos+=("Unit=$unidad (se esperaba USD)")
+      [ "$periodo" != "MONTHLY" ] && fallos+=("TimeUnit=$periodo (se esperaba MONTHLY)")
+      [ "$tipo" != "COST" ] && fallos+=("BudgetType=$tipo (se esperaba COST)")
+      [ "$credito" != "false" ] && fallos+=("IncludeCredit=$credito (se esperaba false)")
+      [ "$reembolso" != "false" ] && fallos+=("IncludeRefund=$reembolso (se esperaba false)")
+      [[ "$inicio" =~ ^[0-9]{4}-[0-9]{2}-01 ]] || fallos+=("TimePeriod.Start=$inicio (se esperaba un día 1)")
+      if [ ${#fallos[@]} -eq 0 ]; then
+        estado="aprobado"
+        detalle="$BUDGET_NAME: Amount=$monto USD, TimeUnit=MONTHLY, inicio=${inicio:0:10}, BudgetType=COST, IncludeCredit=false, IncludeRefund=false"
+      else
+        estado="no_aprobado"
+        detalle="no conforme: $(printf '%s; ' "${fallos[@]}" | sed 's/; $//')"
+      fi
+    fi
+  fi
+  jq -cn --arg c "$criterio" --arg r "$requisito" --arg e "$estado" --arg d "$detalle" \
+    '{criterio: $c, requisito: $r, estado: $e, detalle: $d}'
+)
+```
+
+Cómo se interpreta:
+
+| Salida de la consulta | `estado` | `detalle` | Requisito |
+| --- | --- | --- | --- |
+| Todos los valores coinciden con lo esperado | `aprobado` | Los valores observados | R20.1 |
+| El presupuesto no existe (`NotFoundException`) | `no_aprobado` | `el presupuesto PgGuardian-Mensual no existe ...` | R20.7 |
+| Monto distinto de 30, `TimeUnit` distinto de `MONTHLY`, `BudgetType` distinto de `COST` o periodo que no empieza el día 1 | `no_aprobado` | Cada valor que falló, separados por `;` | R20.1 |
+| `IncludeCredit=true` o `IncludeRefund=true` | `no_aprobado` | `IncludeCredit=true (se esperaba false)` o `IncludeRefund=true (se esperaba false)` | R20.1 |
+| El comando falla por otra causa (p. ej. `AccessDeniedException` sin el acceso de 1.1.2, sesión expirada) | `no_verificable` | El mensaje de error de la CLI | — |
+| Falta algún valor en la respuesta | `no_verificable` | Qué valores faltaron | — |
+
+Ejemplos de líneas:
+
+```json
+{"criterio":"CA-24","requisito":"R20","estado":"aprobado","detalle":"PgGuardian-Mensual: Amount=30.0 USD, TimeUnit=MONTHLY, inicio=2026-11-01, BudgetType=COST, IncludeCredit=false, IncludeRefund=false"}
+{"criterio":"CA-24","requisito":"R20","estado":"no_aprobado","detalle":"no conforme: IncludeCredit=true (se esperaba false)"}
+{"criterio":"CA-24","requisito":"R20","estado":"no_verificable","detalle":"falló aws budgets describe-budget: An error occurred (AccessDeniedException) when calling the DescribeBudget operation: ..."}
+```
+
+#### 7.1.3 Verificación con `aws budgets describe-notifications-for-budget` (R20.2 a R20.5, R20.7)
+
+Consulta directa, para guardar la salida en la evidencia. El segundo comando lista los destinatarios de cada notificación (R20.4):
+
+```bash
+SELLO=$(date -u +%Y%m%dT%H%MZ)
+aws budgets describe-notifications-for-budget --account-id "$ACCOUNT_ID" --budget-name "$BUDGET_NAME" \
+  --output json | tee "docs/aws/evidencia/costos/notificaciones-$SELLO.json"
+jq -c '(.Notifications // [])[] | {NotificationType, ComparisonOperator, Threshold, ThresholdType}' \
+    "docs/aws/evidencia/costos/notificaciones-$SELLO.json" |
+  while read -r notif; do
+    echo "== $notif"
+    aws budgets describe-subscribers-for-notification --account-id "$ACCOUNT_ID" \
+      --budget-name "$BUDGET_NAME" --notification "$notif" \
+      --query 'Subscribers[].{Tipo: SubscriptionType, Direccion: Address}' --output table
+  done | tee "docs/aws/evidencia/costos/destinatarios-$SELLO.txt"
+```
+
+Resultado esperado: exactamente estas 4 notificaciones (el orden puede variar; `NotificationState` puede ser `OK` o `ALARM` y no se evalúa), cada una con al menos un destinatario `EMAIL` igual a `AlertEmail`:
+
+| `NotificationType` | `ComparisonOperator` | `Threshold` | `ThresholdType` | Equivale a | Requisito |
+| --- | --- | --- | --- | --- | --- |
+| `ACTUAL` | `GREATER_THAN` | `50.0` | `PERCENTAGE` | 15.00 USD de gasto real | R20.2 |
+| `ACTUAL` | `GREATER_THAN` | `80.0` | `PERCENTAGE` | 24.00 USD de gasto real | R20.2 |
+| `ACTUAL` | `GREATER_THAN` | `100.0` | `PERCENTAGE` | 30.00 USD de gasto real | R20.2 |
+| `FORECASTED` | `GREATER_THAN` | `100.0` | `PERCENTAGE` | 30.00 USD de gasto pronosticado | R20.3 |
+
+Evaluación automática del criterio. Pegar el bloque completo en CloudShell después de 7.1.1. Compara las notificaciones observadas con las 4 esperadas y anota en el `detalle` las faltantes y las sobrantes (R20.7):
+
+```bash
+(
+  criterio="CA-24"; requisito="R20"
+  esperadas='["ACTUAL|GREATER_THAN|50|PERCENTAGE","ACTUAL|GREATER_THAN|80|PERCENTAGE","ACTUAL|GREATER_THAN|100|PERCENTAGE","FORECASTED|GREATER_THAN|100|PERCENTAGE"]'
+  if [ -z "${ACCOUNT_ID:-}" ] || [ -z "${BUDGET_NAME:-}" ] || [ -z "${ALERT_EMAIL:-}" ] || [ "$ALERT_EMAIL" = "None" ]; then
+    estado="no_verificable"
+    detalle="faltan ACCOUNT_ID, BUDGET_NAME o ALERT_EMAIL; ejecutar antes 7.1.1"
+  elif ! salida=$(aws budgets describe-notifications-for-budget --account-id "$ACCOUNT_ID" \
+        --budget-name "$BUDGET_NAME" --output json 2>&1); then
+    if grep -q 'NotFoundException' <<< "$salida"; then
+      estado="no_aprobado"
+      detalle="no conforme: el presupuesto $BUDGET_NAME no existe en la cuenta $ACCOUNT_ID (R20.7)"
+    else
+      estado="no_verificable"
+      detalle="falló aws budgets describe-notifications-for-budget: $(echo "$salida" | tr '\n' ' ')"
+    fi
+  else
+    # Clave de cada notificación: tipo|operador|umbral|tipo de umbral. "+ 0" deja 50.0 como 50.
+    observadas=$(jq -c '[(.Notifications // [])[]
+      | "\(.NotificationType)|\(.ComparisonOperator)|\(.Threshold + 0)|\(.ThresholdType)"]' <<< "$salida")
+    total=$(jq 'length' <<< "$observadas")
+    faltan=$(jq -nr --argjson e "$esperadas" --argjson o "$observadas" '($e - $o) | join(", ")')
+    sobran=$(jq -nr --argjson e "$esperadas" --argjson o "$observadas" '($o - $e) | join(", ")')
+    fallos=(); errores=(); destinatarios=()
+    [ "$total" -ne 4 ] && fallos+=("$total notificaciones (se esperaban exactamente 4)")
+    [ -n "$faltan" ] && fallos+=("faltan: $faltan")
+    [ -n "$sobran" ] && fallos+=("sobran: $sobran")
+    # Duplicados de una notificación esperada: no aparecen en "sobran" pero suben el total.
+    while read -r notif; do
+      clave=$(jq -r '"\(.NotificationType)|\(.ComparisonOperator)|\(.Threshold + 0)|\(.ThresholdType)"' <<< "$notif")
+      if ! subs=$(aws budgets describe-subscribers-for-notification --account-id "$ACCOUNT_ID" \
+            --budget-name "$BUDGET_NAME" --notification "$notif" --output json 2>&1); then
+        errores+=("$clave: $(echo "$subs" | tr '\n' ' ')")
+        continue
+      fi
+      n_correo=$(jq '[(.Subscribers // [])[] | select(.SubscriptionType == "EMAIL")] | length' <<< "$subs")
+      con_alerta=$(jq --arg m "$ALERT_EMAIL" \
+        '[(.Subscribers // [])[] | select(.SubscriptionType == "EMAIL" and (.Address | ascii_downcase) == ($m | ascii_downcase))] | length' <<< "$subs")
+      destinatarios+=("$clave=$n_correo")
+      { [ "$n_correo" -lt 1 ] || [ "$n_correo" -gt 5 ]; } \
+        && fallos+=("$clave con $n_correo destinatarios de correo (se esperaban de 1 a 5)")
+      [ "$con_alerta" -eq 0 ] && fallos+=("$clave sin AlertEmail entre los destinatarios")
+    done < <(jq -c '(.Notifications // [])[] | {NotificationType, ComparisonOperator, Threshold, ThresholdType}' <<< "$salida")
+    if [ ${#errores[@]} -gt 0 ]; then
+      estado="no_verificable"
+      detalle="falló aws budgets describe-subscribers-for-notification: $(printf '%s; ' "${errores[@]}" | sed 's/; $//')"
+    elif [ ${#fallos[@]} -gt 0 ]; then
+      estado="no_aprobado"
+      detalle="no conforme: $(printf '%s; ' "${fallos[@]}" | sed 's/; $//')"
+    else
+      estado="aprobado"
+      detalle="4 notificaciones: ACTUAL 50/80/100 % y FORECASTED 100 %, GREATER_THAN, PERCENTAGE; destinatarios de correo por notificación: ${destinatarios[*]}; AlertEmail en todas"
+    fi
+  fi
+  jq -cn --arg c "$criterio" --arg r "$requisito" --arg e "$estado" --arg d "$detalle" \
+    '{criterio: $c, requisito: $r, estado: $e, detalle: $d}'
+)
+```
+
+Cómo se interpreta:
+
+| Salida de la consulta | `estado` | `detalle` | Requisito |
+| --- | --- | --- | --- |
+| Las 4 notificaciones esperadas, sin otras, cada una con 1 a 5 destinatarios de correo e incluido `AlertEmail` | `aprobado` | Notificaciones y número de destinatarios por notificación | R20.2 a R20.5 |
+| Falta alguna de las 4 notificaciones esperadas | `no_aprobado` | `faltan: <clave>, ...` y el total observado | R20.7 |
+| Hay notificaciones que no están entre las 4 esperadas (otro umbral, otro operador, `ABSOLUTE_VALUE`, etc.) | `no_aprobado` | `sobran: <clave>, ...` y el total observado | R20.7 |
+| El total no es 4 (incluye notificaciones repetidas) | `no_aprobado` | `<n> notificaciones (se esperaban exactamente 4)` | R20.5, R20.7 |
+| Una notificación sin destinatarios de correo, con más de 5 o sin `AlertEmail` | `no_aprobado` | La notificación y la condición que falló | R20.4 |
+| El presupuesto no existe (`NotFoundException`) | `no_aprobado` | `el presupuesto PgGuardian-Mensual no existe ...` | R20.7 |
+| Falla `describe-notifications-for-budget` o `describe-subscribers-for-notification` por otra causa | `no_verificable` | El mensaje de error de la CLI | — |
+
+La clave de cada notificación en el `detalle` tiene la forma `TIPO|OPERADOR|UMBRAL|TIPO_DE_UMBRAL`; por ejemplo, `ACTUAL|GREATER_THAN|80|PERCENTAGE` es la alerta de gasto real al 80 %. Así, el `detalle` de un `no_aprobado` deja anotadas las notificaciones faltantes y sobrantes que pide R20.7.
+
+Ejemplos de líneas:
+
+```json
+{"criterio":"CA-24","requisito":"R20","estado":"aprobado","detalle":"4 notificaciones: ACTUAL 50/80/100 % y FORECASTED 100 %, GREATER_THAN, PERCENTAGE; destinatarios de correo por notificación: ACTUAL|GREATER_THAN|50|PERCENTAGE=1 ACTUAL|GREATER_THAN|80|PERCENTAGE=1 ACTUAL|GREATER_THAN|100|PERCENTAGE=1 FORECASTED|GREATER_THAN|100|PERCENTAGE=1; AlertEmail en todas"}
+{"criterio":"CA-24","requisito":"R20","estado":"no_aprobado","detalle":"no conforme: 3 notificaciones (se esperaban exactamente 4); faltan: FORECASTED|GREATER_THAN|100|PERCENTAGE"}
+{"criterio":"CA-24","requisito":"R20","estado":"no_aprobado","detalle":"no conforme: 5 notificaciones (se esperaban exactamente 4); sobran: ACTUAL|GREATER_THAN|90|PERCENTAGE"}
+{"criterio":"CA-24","requisito":"R20","estado":"no_verificable","detalle":"falló aws budgets describe-notifications-for-budget: An error occurred (AccessDeniedException) ..."}
+```
+
+#### 7.1.4 Correo de alerta recibido (R20.6, revisión manual)
+
+AWS Budgets envía el correo a los destinatarios `EMAIL` cuando el gasto supera un umbral; estos destinatarios no requieren confirmación de suscripción. La configuración que lo hace posible (umbrales y destinatarios) es la que verifica 7.1.3. El envío en sí depende del gasto real del mes y no se puede forzar sin gastar, así que este paso no es una condición previa de CA-24: se documenta si ocurre durante el proyecto.
+
+Con unos 22 USD al mes de gasto bruto 24/7, lo esperable es que llegue la alerta de 50 % (15.00 USD) a mitad de mes y, según el pronóstico, quizá la de `FORECASTED` 100 %. Cuando llegue un correo de AWS Budgets a `AlertEmail`:
+
+1. Revisar también la carpeta de spam la primera vez.
+2. Guardar una captura del correo (asunto, fecha y umbral; se puede tapar la dirección) en `docs/aws/evidencia/costos/alerta-<AAAAMMDD>.png`.
+3. Anotar a mano la línea de resultado:
+
+```json
+{"criterio":"CA-24","requisito":"R20","estado":"aprobado","detalle":"R20.6: correo de alerta ACTUAL 50 % recibido en AlertEmail el AAAA-MM-DD; captura alerta-AAAAMMDD.png; revisó <nombre>"}
+```
+
+Si el gasto supera un umbral (se ve en **Billing and Cost Management** → **Budgets** → `PgGuardian-Mensual`, notificación en estado `ALARM`) y no llegó ningún correo en 24 h, la línea es `no_aprobado`, con el umbral y la fecha en el `detalle`. Se revisan la dirección de `AlertEmail` (7.1.1) y los destinatarios de 7.1.3.
+
+#### 7.1.5 Corrección y resumen
+
+Corrección ante `no_aprobado` en 7.1.2 o 7.1.3: el presupuesto pertenece al stack, así que no se edita en la consola de AWS Budgets (generaría *drift*, 2.3). Según la causa:
+
+- Monto distinto de 30: se actualiza el stack con `MonthlyBudgetUsd=30` (2.3).
+- `CostTypes`, `TimeUnit`, `BudgetType`, notificaciones faltantes, sobrantes o con otro umbral: se corrige el recurso `MonthlyBudget` en `infra/cloudformation/pgguardian.yaml` y se actualiza el stack (2.3).
+- `AlertEmail` incorrecto o sin destinatarios: se actualiza el stack con el valor correcto de `AlertEmail` (2.3).
+- Presupuesto inexistente: se revisa en los eventos del stack (comando de 2.1.6) si `MonthlyBudget` falló o se borró, y se actualiza el stack (2.3) para que CloudFormation lo vuelva a crear.
+
+Después se repiten 7.1.2 y 7.1.3 completas, conservando las líneas anteriores en la evidencia.
+
+| Criterio | Bloques que deben estar en `aprobado` | Partes en otras secciones |
+| --- | --- | --- |
+| CA-24 (presupuesto, R20) | 7.1.2 (R20.1) y 7.1.3 (R20.2 a R20.5, R20.7) | 1.1.2 (acceso IAM a la facturación), 2.1.6 (creación del stack); 7.1.4 (R20.6) si llega un correo de alerta |
+
+CA-24 queda aprobado en su parte de presupuesto solo si 7.1.2 y 7.1.3 están en `aprobado`; la parte de Cost Anomaly Detection (R21) se verifica en 7.2. Un `no_aprobado` o `no_verificable` nunca se da por aprobado: se corrige la causa y se repite el bloque.
+
+### 7.2 Cost Anomaly Detection (T-20 · RF-07.2 · CA-24 · R21)
+
+El monitor y la suscripción los crea la plantilla: recurso `CostAnomalyMonitor` (`AWS::CE::AnomalyMonitor`) con el nombre `PgGuardian-Services`, de tipo `DIMENSIONAL` y dimensión `SERVICE`, y recurso `CostAnomalySubscription` (`AWS::CE::AnomalySubscription`) con el nombre `PgGuardian-Daily`, frecuencia `DAILY`, un suscriptor `EMAIL` igual a `AlertEmail` y el umbral en `ThresholdExpression` (`ANOMALY_TOTAL_IMPACT_ABSOLUTE` `GREATER_THAN_OR_EQUAL` 1 USD). El aviso es un resumen diario por correo, no un aviso en 60 minutos: la desviación está en `docs/aws/decision-log.md` (R24.10). Esta sección no crea ni cambia nada; solo lee el monitor y la suscripción y los compara con lo que exige R21.
+
+**Plan B (R29.10): no se activó.** El primer despliegue falló en `AppSecurityGroup`, no en los recursos de anomalías (`docs/aws/evidencia/stack/eventos-fallidos-20261126T0255Z.txt`). El segundo change set (`change-set-pgguardian-20261126-0318.txt`) incluyó `CostAnomalyMonitor` y `CostAnomalySubscription` entre sus 11 recursos y el stack quedó en `CREATE_COMPLETE`. Por eso los dos recursos pertenecen al stack y `scripts/aws/create_anomaly_detection.sh` no existe. Si un despliegue futuro aplica el plan B (2.4), se escribe ese script (tarea 7.2) con el mismo monitor, la misma suscripción y la misma comprobación previa de 2.1.3, se anota aquí que el monitor y la suscripción quedan fuera del stack (no se borran con 2.5) y se pone `PLAN_B=1` en 7.2.1.
+
+Condiciones que deben cumplir el monitor y la suscripción:
+
+| Condición | Requisito | Verificación |
+| --- | --- | --- |
+| Existe un solo monitor `PgGuardian-Services`, `DIMENSIONAL` y `SERVICE` | R21.1 | 7.2.2 |
+| El monitor ya evalúa el gasto (`LastEvaluatedDate` presente) | R21.1 | 7.2.2 |
+| La cuenta tiene de 1 a 10 monitores | R21.1 | 7.2.2 |
+| El monitor es el recurso `CostAnomalyMonitor` del stack (salvo plan B) | R29.10 | 7.2.2 |
+| La suscripción `PgGuardian-Daily` incluye el monitor y tiene `Frequency=DAILY` | R21.2 | 7.2.3 |
+| Entre los suscriptores `EMAIL` está `AlertEmail`, con `Status=CONFIRMED` | R21.2, R21.3 | 7.2.3 |
+| `ThresholdExpression` es `ANOMALY_TOTAL_IMPACT_ABSOLUTE` `GREATER_THAN_OR_EQUAL` 1 (USD), sin otras condiciones | R21.2 | 7.2.3 |
+| La anomalía detectada queda registrada y el aviso trae el nombre del monitor, el monto en USD y la fecha | R21.3, R21.4 | 7.2.4 |
+
+Los comandos `aws ce` llevan `--region us-east-1` porque la API de Cost Explorer solo tiene endpoint en esa región (igual que en 2.1.3). Antes de versionar los archivos de evidencia, el ID de la cuenta y el correo se reemplazan por `<cuenta>` y `<correo>`, como en `docs/aws/evidencia/stack/`.
+
+#### 7.2.1 Preparación en CloudShell
+
+Se ejecuta en CloudShell (`us-east-2`, Usuario_IAM con MFA). El correo se lee de los parámetros del stack y el ARN del monitor, de los recursos del stack:
+
+```bash
+mkdir -p docs/aws/evidencia/costos
+MONITOR_NAME="PgGuardian-Services"
+SUB_NAME="PgGuardian-Daily"
+PLAN_B=0   # 1 solo si se aplicó el plan B de 2.4
+ALERT_EMAIL=$(aws cloudformation describe-stacks --stack-name pgguardian \
+  --query "Stacks[0].Parameters[?ParameterKey=='AlertEmail'].ParameterValue" --output text)
+if [ "$PLAN_B" = "0" ]; then
+  STACK_MONITOR_ARN=$(aws cloudformation describe-stack-resource --stack-name pgguardian \
+    --logical-resource-id CostAnomalyMonitor \
+    --query 'StackResourceDetail.PhysicalResourceId' --output text)
+else
+  STACK_MONITOR_ARN="fuera del stack (plan B)"
+fi
+echo "monitor=$MONITOR_NAME suscripcion=$SUB_NAME alertas=$ALERT_EMAIL monitor_del_stack=$STACK_MONITOR_ARN"
+```
+
+Resultado esperado: el correo con el que se creó el stack (2.1.4) y un ARN `arn:aws:ce::<cuenta>:anomalymonitor/...`, ninguno vacío ni `None`. Si la sesión de CloudShell se reinicia, se repite este bloque.
+
+#### 7.2.2 Verificación con `aws ce get-anomaly-monitors` (R21.1)
+
+Consulta directa, para guardar la salida en la evidencia:
+
+```bash
+SELLO=$(date -u +%Y%m%dT%H%MZ)
+aws ce get-anomaly-monitors --region us-east-1 --output json \
+  | tee "docs/aws/evidencia/costos/anomaly-monitors-$SELLO.json"
+```
+
+Resultado esperado: un monitor como este (las fechas y `DimensionalValueCount` varían). Tras borrar el monitor por defecto en 2.1.3, debería ser el único de la cuenta:
+
+```json
+{
+    "AnomalyMonitors": [
+        {
+            "MonitorArn": "arn:aws:ce::<cuenta>:anomalymonitor/...",
+            "MonitorName": "PgGuardian-Services",
+            "CreationDate": "2026-11-26T03:25:00Z",
+            "LastEvaluatedDate": "2026-11-27T09:10:00Z",
+            "MonitorType": "DIMENSIONAL",
+            "MonitorDimension": "SERVICE",
+            "DimensionalValueCount": 6
+        }
+    ]
+}
+```
+
+Cost Anomaly Detection no tiene un campo de estado del monitor: un monitor que existe está activo, y `LastEvaluatedDate` muestra que ya evaluó el gasto. Un monitor recién creado puede tardar hasta 24 h en tener esa fecha.
+
+Evaluación automática del criterio. Pegar el bloque completo en CloudShell después de 7.2.1:
+
+```bash
+(
+  criterio="CA-24"; requisito="R21.1"
+  if [ -z "${MONITOR_NAME:-}" ] || [ -z "${PLAN_B:-}" ] \
+     || { [ "$PLAN_B" = "0" ] && { [ -z "${STACK_MONITOR_ARN:-}" ] || [ "$STACK_MONITOR_ARN" = "None" ]; }; }; then
+    estado="no_verificable"
+    detalle="faltan MONITOR_NAME, PLAN_B o STACK_MONITOR_ARN; ejecutar antes 7.2.1"
+  elif ! salida=$(aws ce get-anomaly-monitors --region us-east-1 --output json 2>&1); then
+    estado="no_verificable"
+    detalle="falló aws ce get-anomaly-monitors: $(echo "$salida" | tr '\n' ' ')"
+  else
+    total=$(jq '(.AnomalyMonitors // []) | length' <<< "$salida")
+    n=$(jq --arg n "$MONITOR_NAME" '[(.AnomalyMonitors // [])[] | select(.MonitorName == $n)] | length' <<< "$salida")
+    if [ "$n" -eq 0 ]; then
+      estado="no_aprobado"
+      detalle="no conforme: no existe el monitor $MONITOR_NAME; la cuenta tiene $total monitores"
+    else
+      mon=$(jq -c --arg n "$MONITOR_NAME" '[.AnomalyMonitors[] | select(.MonitorName == $n)][0]' <<< "$salida")
+      arn=$(jq -r '.MonitorArn // "ausente"' <<< "$mon")
+      tipo=$(jq -r '.MonitorType // "ausente"' <<< "$mon")
+      dim=$(jq -r '.MonitorDimension // "ausente"' <<< "$mon")
+      creado=$(jq -r '.CreationDate // "ausente"' <<< "$mon")
+      evaluado=$(jq -r '.LastEvaluatedDate // "ausente"' <<< "$mon")
+      fallos=()
+      [ "$n" -gt 1 ] && fallos+=("$n monitores llamados $MONITOR_NAME (se esperaba 1)")
+      [ "$tipo" != "DIMENSIONAL" ] && fallos+=("MonitorType=$tipo (se esperaba DIMENSIONAL)")
+      [ "$dim" != "SERVICE" ] && fallos+=("MonitorDimension=$dim (se esperaba SERVICE)")
+      [ "$total" -gt 10 ] && fallos+=("$total monitores en la cuenta (se esperaban de 1 a 10)")
+      [ "$PLAN_B" = "0" ] && [ "$arn" != "$STACK_MONITOR_ARN" ] \
+        && fallos+=("MonitorArn=$arn distinto del recurso CostAnomalyMonitor del stack ($STACK_MONITOR_ARN)")
+      if [ ${#fallos[@]} -gt 0 ]; then
+        estado="no_aprobado"
+        detalle="no conforme: $(printf '%s; ' "${fallos[@]}" | sed 's/; $//')"
+      elif [ "$evaluado" = "ausente" ]; then
+        estado="no_verificable"
+        detalle="$MONITOR_NAME aún sin LastEvaluatedDate (creado $creado); repetir 24 h después de la creación"
+      else
+        origen="recurso CostAnomalyMonitor del stack"
+        [ "$PLAN_B" != "0" ] && origen="fuera del stack (plan B)"
+        estado="aprobado"
+        detalle="$MONITOR_NAME: DIMENSIONAL/SERVICE, $origen, última evaluación $evaluado; $total monitores en la cuenta"
+      fi
+    fi
+  fi
+  jq -cn --arg c "$criterio" --arg r "$requisito" --arg e "$estado" --arg d "$detalle" \
+    '{criterio: $c, requisito: $r, estado: $e, detalle: $d}'
+)
+```
+
+Cómo se interpreta:
+
+| Salida de la consulta | `estado` | `detalle` | Requisito |
+| --- | --- | --- | --- |
+| Un monitor `PgGuardian-Services` `DIMENSIONAL`/`SERVICE`, del stack, con `LastEvaluatedDate`, y de 1 a 10 monitores en la cuenta | `aprobado` | Los valores observados | R21.1 |
+| No existe `PgGuardian-Services` | `no_aprobado` | `no existe el monitor ...` y el total de monitores | R21.1 |
+| Tipo o dimensión distintos, monitor repetido o más de 10 monitores | `no_aprobado` | Cada valor que falló, separados por `;` | R21.1 |
+| El ARN no coincide con el recurso `CostAnomalyMonitor` del stack (monitor creado a mano con el mismo nombre) | `no_aprobado` | Los dos ARN | R29.10 |
+| El monitor existe pero aún no tiene `LastEvaluatedDate` | `no_verificable` | La fecha de creación; se repite 24 h después | R21.1 |
+| El comando falla (p. ej. `AccessDeniedException` sin el acceso de 1.1.2, sesión expirada) o faltan variables | `no_verificable` | El mensaje de error de la CLI | — |
+
+Ejemplos de líneas:
+
+```json
+{"criterio":"CA-24","requisito":"R21.1","estado":"aprobado","detalle":"PgGuardian-Services: DIMENSIONAL/SERVICE, recurso CostAnomalyMonitor del stack, última evaluación 2026-11-27T09:10:00Z; 1 monitores en la cuenta"}
+{"criterio":"CA-24","requisito":"R21.1","estado":"no_aprobado","detalle":"no conforme: no existe el monitor PgGuardian-Services; la cuenta tiene 0 monitores"}
+{"criterio":"CA-24","requisito":"R21.1","estado":"no_verificable","detalle":"PgGuardian-Services aún sin LastEvaluatedDate (creado 2026-11-26T03:25:00Z); repetir 24 h después de la creación"}
+```
+
+#### 7.2.3 Verificación con `aws ce get-anomaly-subscriptions` (R21.2, R21.3)
+
+Consulta directa, para guardar la salida en la evidencia:
+
+```bash
+SELLO=$(date -u +%Y%m%dT%H%MZ)
+MONITOR_ARN=$(aws ce get-anomaly-monitors --region us-east-1 \
+  --query "AnomalyMonitors[?MonitorName=='$MONITOR_NAME'].MonitorArn | [0]" --output text)
+echo "$MONITOR_ARN"
+aws ce get-anomaly-subscriptions --region us-east-1 --monitor-arn "$MONITOR_ARN" --output json \
+  | tee "docs/aws/evidencia/costos/anomaly-subscriptions-$SELLO.json"
+```
+
+Resultado esperado (`Values` puede venir como `"1"` o `"1.0"`; si la respuesta trae el campo obsoleto `Threshold`, no se evalúa):
+
+```json
+{
+    "AnomalySubscriptions": [
+        {
+            "SubscriptionArn": "arn:aws:ce::<cuenta>:anomalysubscription/...",
+            "AccountId": "<cuenta>",
+            "MonitorArnList": [
+                "arn:aws:ce::<cuenta>:anomalymonitor/..."
+            ],
+            "Subscribers": [
+                {
+                    "Address": "<correo>",
+                    "Type": "EMAIL",
+                    "Status": "CONFIRMED"
+                }
+            ],
+            "Frequency": "DAILY",
+            "SubscriptionName": "PgGuardian-Daily",
+            "ThresholdExpression": {
+                "Dimensions": {
+                    "Key": "ANOMALY_TOTAL_IMPACT_ABSOLUTE",
+                    "Values": [
+                        "1.0"
+                    ],
+                    "MatchOptions": [
+                        "GREATER_THAN_OR_EQUAL"
+                    ]
+                }
+            }
+        }
+    ]
+}
+```
+
+`Status` del suscriptor es la forma en que Cost Anomaly Detection indica un problema de entrega (R21.3): `CONFIRMED` recibe los avisos y `DECLINED` indica que la dirección canceló la suscripción desde el enlace del correo. Los suscriptores `EMAIL` creados por la API no necesitan confirmación y quedan en `CONFIRMED`.
+
+Evaluación automática del criterio. Pegar el bloque completo en CloudShell después de 7.2.1:
+
+```bash
+(
+  criterio="CA-24"; requisito="R21.2, R21.3"
+  if [ -z "${MONITOR_NAME:-}" ] || [ -z "${SUB_NAME:-}" ] || [ -z "${ALERT_EMAIL:-}" ] || [ "$ALERT_EMAIL" = "None" ]; then
+    estado="no_verificable"
+    detalle="faltan MONITOR_NAME, SUB_NAME o ALERT_EMAIL; ejecutar antes 7.2.1"
+  elif ! arn=$(aws ce get-anomaly-monitors --region us-east-1 \
+        --query "AnomalyMonitors[?MonitorName=='$MONITOR_NAME'].MonitorArn | [0]" --output text 2>&1); then
+    estado="no_verificable"
+    detalle="falló aws ce get-anomaly-monitors: $(echo "$arn" | tr '\n' ' ')"
+  elif [ -z "$arn" ] || [ "$arn" = "None" ]; then
+    estado="no_aprobado"
+    detalle="no conforme: no existe el monitor $MONITOR_NAME (ver 7.2.2)"
+  elif ! salida=$(aws ce get-anomaly-subscriptions --region us-east-1 --monitor-arn "$arn" --output json 2>&1); then
+    estado="no_verificable"
+    detalle="falló aws ce get-anomaly-subscriptions: $(echo "$salida" | tr '\n' ' ')"
+  else
+    n=$(jq --arg s "$SUB_NAME" '[(.AnomalySubscriptions // [])[] | select(.SubscriptionName == $s)] | length' <<< "$salida")
+    if [ "$n" -eq 0 ]; then
+      otras=$(jq -r '[(.AnomalySubscriptions // [])[].SubscriptionName] | if length == 0 then "ninguna" else join(", ") end' <<< "$salida")
+      estado="no_aprobado"
+      detalle="no conforme: el monitor $MONITOR_NAME no tiene la suscripción $SUB_NAME; suscripciones del monitor: $otras"
+    else
+      sub=$(jq -c --arg s "$SUB_NAME" '[.AnomalySubscriptions[] | select(.SubscriptionName == $s)][0]' <<< "$salida")
+      frecuencia=$(jq -r '.Frequency // "ausente"' <<< "$sub")
+      en_lista=$(jq --arg a "$arn" '[(.MonitorArnList // [])[] | select(. == $a)] | length' <<< "$sub")
+      n_correo=$(jq '[(.Subscribers // [])[] | select(.Type == "EMAIL")] | length' <<< "$sub")
+      estado_alerta=$(jq -r --arg m "$ALERT_EMAIL" '[(.Subscribers // [])[]
+        | select(.Type == "EMAIL" and ((.Address // "") | ascii_downcase) == ($m | ascii_downcase))
+        | (.Status // "ausente")] | join(",")' <<< "$sub")
+      # ThresholdExpression puede llegar como objeto o como texto JSON.
+      umbral=$(jq -c '(.ThresholdExpression // {}) | if type == "string" then (try fromjson catch {}) else . end' <<< "$sub")
+      umbral_ok=$(jq '(.Dimensions // null) as $d
+        | ($d != null) and ((keys - ["Dimensions"]) == [])
+          and ($d.Key == "ANOMALY_TOTAL_IMPACT_ABSOLUTE")
+          and ($d.MatchOptions == ["GREATER_THAN_OR_EQUAL"])
+          and ((($d.Values // []) | length) == 1)
+          and (((($d.Values // [])[0] // "") | tonumber? // -1) == 1)' <<< "$umbral")
+      fallos=()
+      [ "$n" -gt 1 ] && fallos+=("$n suscripciones llamadas $SUB_NAME (se esperaba 1)")
+      [ "$frecuencia" != "DAILY" ] && fallos+=("Frequency=$frecuencia (se esperaba DAILY)")
+      [ "$en_lista" -eq 0 ] && fallos+=("MonitorArnList no incluye $MONITOR_NAME")
+      [ "$n_correo" -lt 1 ] && fallos+=("sin suscriptores EMAIL")
+      if [ -z "$estado_alerta" ]; then
+        fallos+=("AlertEmail no está entre los suscriptores EMAIL")
+      elif [ "$estado_alerta" != "CONFIRMED" ]; then
+        fallos+=("suscriptor AlertEmail con Status=$estado_alerta (se esperaba CONFIRMED)")
+      fi
+      [ "$umbral_ok" != "true" ] \
+        && fallos+=("ThresholdExpression=$umbral (se esperaba ANOMALY_TOTAL_IMPACT_ABSOLUTE GREATER_THAN_OR_EQUAL 1)")
+      if [ ${#fallos[@]} -gt 0 ]; then
+        estado="no_aprobado"
+        detalle="no conforme: $(printf '%s; ' "${fallos[@]}" | sed 's/; $//')"
+      else
+        estado="aprobado"
+        detalle="$SUB_NAME: Frequency=DAILY, monitor $MONITOR_NAME, $n_correo suscriptores EMAIL con AlertEmail en CONFIRMED, ThresholdExpression ANOMALY_TOTAL_IMPACT_ABSOLUTE >= 1 USD"
+      fi
+    fi
+  fi
+  jq -cn --arg c "$criterio" --arg r "$requisito" --arg e "$estado" --arg d "$detalle" \
+    '{criterio: $c, requisito: $r, estado: $e, detalle: $d}'
+)
+```
+
+Cómo se interpreta:
+
+| Salida de la consulta | `estado` | `detalle` | Requisito |
+| --- | --- | --- | --- |
+| `PgGuardian-Daily` con el monitor, `DAILY`, `AlertEmail` en `CONFIRMED` y el umbral de 1 USD | `aprobado` | Los valores observados | R21.2, R21.3 |
+| El monitor no tiene `PgGuardian-Daily` | `no_aprobado` | Las suscripciones que sí tiene el monitor | R21.2 |
+| `Frequency` distinta de `DAILY`, o `MonitorArnList` sin el monitor | `no_aprobado` | Cada valor que falló, separados por `;` | R21.2 |
+| Sin suscriptores `EMAIL` o sin `AlertEmail` entre ellos | `no_aprobado` | La condición que falló | R21.2 |
+| `AlertEmail` con `Status=DECLINED` | `no_aprobado` | `suscriptor AlertEmail con Status=DECLINED ...` | R21.3 |
+| Otro umbral, otro operador, `ANOMALY_TOTAL_IMPACT_PERCENTAGE` o una combinación `And`/`Or` | `no_aprobado` | La `ThresholdExpression` observada | R21.2 |
+| No existe el monitor `PgGuardian-Services` | `no_aprobado` | `no existe el monitor ...`; se revisa 7.2.2 | R21.1 |
+| Falla `get-anomaly-monitors` o `get-anomaly-subscriptions`, o faltan variables | `no_verificable` | El mensaje de error de la CLI | — |
+
+Ejemplos de líneas:
+
+```json
+{"criterio":"CA-24","requisito":"R21.2, R21.3","estado":"aprobado","detalle":"PgGuardian-Daily: Frequency=DAILY, monitor PgGuardian-Services, 1 suscriptores EMAIL con AlertEmail en CONFIRMED, ThresholdExpression ANOMALY_TOTAL_IMPACT_ABSOLUTE >= 1 USD"}
+{"criterio":"CA-24","requisito":"R21.2, R21.3","estado":"no_aprobado","detalle":"no conforme: suscriptor AlertEmail con Status=DECLINED (se esperaba CONFIRMED)"}
+{"criterio":"CA-24","requisito":"R21.2, R21.3","estado":"no_aprobado","detalle":"no conforme: ThresholdExpression={\"And\":[...]} (se esperaba ANOMALY_TOTAL_IMPACT_ABSOLUTE GREATER_THAN_OR_EQUAL 1)"}
+```
+
+#### 7.2.4 Anomalía registrada y aviso recibido (R21.3, R21.4, revisión manual)
+
+Cost Anomaly Detection guarda cada anomalía que detecta, se haya entregado o no el correo, y el resumen diario solo llega si hay anomalías con impacto de al menos 1 USD. Como no se puede forzar una anomalía sin gastar, este paso no es una condición previa de CA-24: se documenta si ocurre durante el proyecto.
+
+Cuando llegue a `AlertEmail` un correo de AWS Cost Anomaly Detection (revisar también la carpeta de spam):
+
+1. Comprobar que el correo trae el nombre del monitor (`PgGuardian-Services`), el impacto del gasto anómalo en USD y la fecha en que se detectó (R21.4).
+2. Guardar una captura (se puede tapar la dirección) en `docs/aws/evidencia/costos/anomalia-<AAAAMMDD>.png`.
+3. Consultar las anomalías registradas del monitor (R21.3). Usa `MONITOR_ARN` de la consulta directa de 7.2.3:
+
+   ```bash
+   aws ce get-anomalies --region us-east-1 --monitor-arn "$MONITOR_ARN" \
+     --date-interval StartDate="$(date -u -d '-30 days' +%F)" \
+     --query 'Anomalies[].{Id: AnomalyId, Inicio: AnomalyStartDate, Servicio: DimensionValue, ImpactoUSD: Impact.TotalImpact}' \
+     --output table | tee "docs/aws/evidencia/costos/anomalias-$(date -u +%Y%m%dT%H%MZ).txt"
+   ```
+
+   Resultado esperado: la anomalía del correo aparece en la tabla con el mismo servicio, fecha e impacto.
+
+4. Anotar a mano la línea de resultado:
+
+```json
+{"criterio":"CA-24","requisito":"R21.3, R21.4","estado":"aprobado","detalle":"resumen diario recibido en AlertEmail el AAAA-MM-DD con monitor PgGuardian-Services, impacto <monto> USD y fecha de detección; anomalía <AnomalyId> en get-anomalies; captura anomalia-AAAAMMDD.png; revisó <nombre>"}
+```
+
+Si `get-anomalies` muestra una anomalía con impacto de 1 USD o más y no llegó ningún correo en las 24 h siguientes, la línea es `no_aprobado`, con el `AnomalyId` y la fecha en el `detalle`. Se repite 7.2.3 para ver el `Status` del suscriptor y la dirección de `AlertEmail`. Si el correo llegó sin alguno de los tres datos de R21.4, la línea es `no_aprobado` con el dato que faltó.
+
+#### 7.2.5 Corrección y resumen
+
+Corrección ante `no_aprobado` en 7.2.2 o 7.2.3: el monitor y la suscripción pertenecen al stack, así que no se editan en la consola de Cost Anomaly Detection (generaría *drift*, 2.3). Según la causa:
+
+- Monitor o suscripción inexistentes: se revisa en los eventos del stack (comando de 2.1.6) si `CostAnomalyMonitor` o `CostAnomalySubscription` fallaron o se borraron, y se actualiza el stack (2.3) para que CloudFormation los vuelva a crear. Si el fallo es de creación de estos recursos, se aplica el plan B (2.4).
+- Tipo, dimensión, frecuencia o `ThresholdExpression` distintos: se corrige el recurso en `infra/cloudformation/pgguardian.yaml` y se actualiza el stack (2.3).
+- `AlertEmail` incorrecto o ausente: se actualiza el stack con el valor correcto de `AlertEmail` (2.3).
+- Suscriptor en `DECLINED`: CloudFormation solo cambia el suscriptor si cambia el valor de `AlertEmail`. Para volver a suscribir la misma dirección, se actualiza el stack dos veces (2.3): primero con otra dirección del Equipo y después con la original.
+- Más de 10 monitores, o un monitor `PgGuardian-Services` que no es el del stack: se listan con la consulta de 7.2.2 y el Equipo decide cuáles borrar. Borrar un monitor modifica la cuenta; se guarda antes su salida de `get-anomaly-monitors` y `get-anomaly-subscriptions` como en 2.1.3.
+
+Después se repiten 7.2.2 y 7.2.3 completas, conservando las líneas anteriores en la evidencia. Un `no_verificable` por falta de `LastEvaluatedDate` no necesita corrección: se repite 7.2.2 cuando pasen 24 h desde la creación del monitor.
+
+| Criterio | Bloques que deben estar en `aprobado` | Partes en otras secciones |
+| --- | --- | --- |
+| CA-24 (anomalías, R21) | 7.2.2 (R21.1) y 7.2.3 (R21.2, R21.3) | 1.1.2 (acceso IAM a la facturación), 2.1.3 (monitor por defecto borrado), 2.1.6 (creación del stack), 2.4 (plan B, R29.10, no activado); 7.2.4 (R21.3, R21.4) si llega un aviso |
+| CA-24 (completo) | 7.1.2, 7.1.3, 7.2.2 y 7.2.3 | Entrada R24.10 del Registro_Decisiones (resumen diario en lugar de aviso en 60 minutos) |
+
+CA-24 queda aprobado solo si 7.1.2, 7.1.3, 7.2.2 y 7.2.3 están en `aprobado`. Un `no_aprobado` o `no_verificable` nunca se da por aprobado: se corrige la causa y se repite el bloque.
+
+### 7.3 Secreto huérfano de Secrets Manager (sin T-xx · limpieza de la cuenta · R27)
+
+La cuenta tiene en `us-east-2` un secreto de Secrets Manager que no pertenece al despliegue actual (Secreto_Huerfano) y que se cobra por mes aunque nadie lo lea. El despliegue de PgGuardian no usa Secrets Manager: la plantilla no declara ningún `AWS::SecretsManager::Secret`, `scripts/aws/make_env.sh` genera los secretos de la aplicación en el `.env` de la Instancia y `docker-compose.prod.yml` los lee de ese archivo. Aun así, el secreto solo se borra después de confirmar que no se usa.
+
+Esta tarea es manual y la ejecuta el Equipo. 7.3.1 a 7.3.3 solo leen. **7.3.4 es el único paso que modifica la cuenta**: va aparte, no forma parte de ningún bloque automático y solo se ejecuta con la confirmación del Equipo y con 7.3.3 en `aprobado`. Si el no uso no se puede confirmar, el secreto se conserva (7.3.5).
+
+| Condición | Requisito | Verificación |
+| --- | --- | --- |
+| Se listan los secretos de `us-east-2` con `list-secrets` y se identifica el Secreto_Huerfano | R27.1 | 7.3.1 |
+| El secreto no lo usa ningún recurso de AWS: no lo administra otro servicio (`OwningService`), no tiene rotación activa, no tiene réplicas y no es un recurso del stack | R27.2 | 7.3.3 |
+| La fecha de último acceso (`LastAccessedDate`) no muestra uso reciente | R27.2 | 7.3.3 |
+| El nombre y el ARN no aparecen en el código, en `docker-compose.prod.yml` ni en el `.env` de la Instancia | R27.2 | 7.3.2, 7.3.3 |
+| El borrado se programa con `delete-secret` y una ventana de recuperación de 7 a 30 días, sin `--force-delete-without-recovery` | R27.3 | 7.3.4 |
+| Si el no uso no se puede confirmar, el secreto se conserva y se registra el motivo | R27.4 | 7.3.5 |
+
+Igual que en 7.1 y 7.2, antes de versionar los archivos de evidencia el ID de la cuenta se reemplaza por `<cuenta>`. Los comandos de esta sección nunca leen el valor del secreto (`get-secret-value`): solo sus metadatos.
+
+#### 7.3.1 Listar los secretos e identificar el Secreto_Huerfano (R27.1)
+
+Se ejecuta en CloudShell (`us-east-2`, Usuario_IAM con MFA), dentro del clon del repositorio de 2.0 actualizado a la rama desplegada (`git pull`):
+
+```bash
+mkdir -p docs/aws/evidencia/costos
+SELLO=$(date -u +%Y%m%dT%H%MZ)
+aws secretsmanager list-secrets --region us-east-2 --include-planned-deletion --output json \
+  | tee "docs/aws/evidencia/costos/secretos-$SELLO.json" \
+  | jq -r '.SecretList[] | [.Name, .ARN, (.CreatedDate // "-"), (.LastAccessedDate // "nunca"),
+      (.OwningService // "-"), (.DeletedDate // "-")] | @tsv' \
+  | column -t -s $'\t' -N 'Nombre,ARN,Creado,UltimoAcceso,OwningService,DeletedDate'
+```
+
+Resultado esperado: una tabla con los secretos de la región. Se identifica el Secreto_Huerfano con estos criterios:
+
+- No pertenece al despliegue actual: el despliegue no crea secretos, así que cualquier secreto de `us-east-2` es candidato.
+- `OwningService` es `-`. Un secreto con `OwningService` (p. ej. `rds`, `appflow`) lo administra otro servicio de AWS; no se trata como huérfano y no se borra con esta sección.
+- `DeletedDate` es `-`. Si ya tiene fecha, su borrado ya está programado y se pasa a 7.3.6.
+
+El Equipo anota el candidato en la sesión de CloudShell. Si hay varios, se repiten 7.3.2 a 7.3.5 para cada uno, de uno en uno:
+
+```bash
+SECRET_ID='arn:aws:secretsmanager:us-east-2:<cuenta>:secret:<nombre>-XXXXXX'   # ARN completo de la tabla
+SECRET_NAME='<nombre>'                                                       # columna Nombre
+```
+
+Si la tabla sale vacía, no hay Secreto_Huerfano en `us-east-2` y R27 queda cumplido sin borrar nada. Se anota a mano:
+
+```json
+{"criterio":"Limpieza de la cuenta","requisito":"R27.1","estado":"aprobado","detalle":"list-secrets en us-east-2 sin secretos (secretos-AAAAMMDDTHHMMZ.json); no hay Secreto_Huerfano; revisó <nombre>"}
+```
+
+Si `list-secrets` falla (p. ej. `AccessDeniedException`), la línea es `no_verificable` con el mensaje de la CLI y no se sigue con 7.3.2.
+
+#### 7.3.2 Búsqueda en el `.env` y en `docker-compose.prod.yml` de la Instancia (R27.2, Session Manager)
+
+El `.env` solo existe en la Instancia y tiene permisos 600, así que la búsqueda se hace en una sesión de Session Manager con `sudo`. Los comandos solo cuentan coincidencias y muestran el nombre de la variable, nunca su valor. Se copian a mano el nombre y el ARN de 7.3.1:
+
+```bash
+APP_DIR=/home/ubuntu/PgGuardian-Online   # el mismo APP_DIR de las secciones 4 y 6
+SECRET_NAME='<nombre>'
+SECRET_ARN='arn:aws:secretsmanager:us-east-2:<cuenta>:secret:<nombre>-XXXXXX'
+for f in "$APP_DIR/.env" "$APP_DIR/docker-compose.prod.yml"; do
+  if sudo test -f "$f"; then
+    printf '%s: %s coincidencias\n' "$f" "$(sudo grep -c -F -e "$SECRET_NAME" -e "$SECRET_ARN" "$f")"
+    sudo grep -n -F -e "$SECRET_NAME" -e "$SECRET_ARN" "$f" | cut -d= -f1   # solo línea y nombre de la variable
+  else
+    echo "$f: no existe"
+  fi
+done
+```
+
+Resultado esperado: `0 coincidencias` en los dos archivos. Se guarda una captura de la salida en `docs/aws/evidencia/costos/secreto-instancia-<AAAAMMDD>.png` y, de vuelta en CloudShell, se anota la suma de coincidencias de los dos archivos:
+
+```bash
+INSTANCIA_COINCIDENCIAS=0   # suma de las coincidencias de .env y docker-compose.prod.yml en la Instancia
+```
+
+Si alguno de los dos archivos no existe o la sesión de Session Manager no abre, no se puede confirmar el no uso: se deja `INSTANCIA_COINCIDENCIAS` sin definir (7.3.3 sale `no_verificable`) o se pasa directo a 7.3.5.
+
+#### 7.3.3 Evaluación del no uso (R27.2)
+
+El bloque lee los metadatos del secreto con `describe-secret`, busca el nombre y el ARN en todo el repositorio con `git grep` (incluidos `docker-compose.prod.yml`, `infra/` y `scripts/`, excepto `docs/aws/evidencia/`, donde están los listados de esta sección) y comprueba que el secreto no es un recurso del stack. Se considera uso reciente un `LastAccessedDate` de los últimos 30 días o desde el día en que se creó el stack. Secrets Manager guarda esa fecha redondeada al día y solo la actualiza cuando alguien lee el valor del secreto.
+
+Pegar el bloque completo en CloudShell, en la raíz del clon, después de 7.3.1 y 7.3.2:
+
+```bash
+(
+  criterio="Limpieza de la cuenta"; requisito="R27.1, R27.2"
+  err=""; fallos=(); dudas=(); creado_stack=""; recursos=""
+  if [ -z "${SECRET_ID:-}" ] || ! [[ "${INSTANCIA_COINCIDENCIAS:-}" =~ ^[0-9]+$ ]]; then
+    err="faltan SECRET_ID (7.3.1) o INSTANCIA_COINCIDENCIAS (7.3.2)"
+  elif ! raiz=$(git rev-parse --show-toplevel 2>/dev/null); then
+    err="el bloque no se ejecutó dentro del clon del repositorio (2.0)"
+  elif ! sec=$(aws secretsmanager describe-secret --region us-east-2 --secret-id "$SECRET_ID" --output json 2>&1); then
+    err="falló describe-secret: $(echo "$sec" | tr '\n' ' ')"
+  elif ! pila=$(aws cloudformation describe-stacks --stack-name pgguardian --output json 2>&1) \
+       && ! grep -q 'does not exist' <<< "$pila"; then
+    err="falló describe-stacks: $(echo "$pila" | tr '\n' ' ')"
+  else
+    # Si el stack ya se borró (2.5), no hay recursos del stack que revisar.
+    creado_stack=$(jq -r '.Stacks[0].CreationTime // empty' <<< "$pila" 2>/dev/null)
+    if [ -n "$creado_stack" ] && ! recursos=$(aws cloudformation list-stack-resources --stack-name pgguardian \
+         --query 'StackResourceSummaries[].PhysicalResourceId' --output text 2>&1); then
+      err="falló list-stack-resources: $(echo "$recursos" | tr '\n' ' ')"
+    fi
+  fi
+  if [ -z "$err" ]; then
+    nombre=$(jq -r '.Name' <<< "$sec"); arn=$(jq -r '.ARN' <<< "$sec")
+    acceso=$(jq -r '.LastAccessedDate // "nunca"' <<< "$sec")
+    borrado=$(jq -r '.DeletedDate // empty' <<< "$sec")
+    servicio=$(jq -r '.OwningService // empty' <<< "$sec")
+    rotacion=$(jq -r '.RotationEnabled // false' <<< "$sec")
+    lambda=$(jq -r '.RotationLambdaARN // "-"' <<< "$sec")
+    replicas=$(jq '(.ReplicationStatus // []) | length' <<< "$sec")
+    primaria=$(jq -r '.PrimaryRegion // "us-east-2"' <<< "$sec")
+    rama=$(git -C "$raiz" rev-parse --abbrev-ref HEAD); commit=$(git -C "$raiz" rev-parse --short HEAD)
+    codigo=$(git -C "$raiz" grep -l -F -e "$nombre" -e "$arn" -- . ':(exclude)docs/aws/evidencia' | tr '\n' ' ' | sed 's/ $//' || true)
+    en_stack=$(tr '\t' '\n' <<< "$recursos" | grep -c -x -F -e "$arn" -e "$nombre" || true)
+    [ -n "$servicio" ] && fallos+=("lo administra el servicio $servicio (OwningService)")
+    [ "$rotacion" = "true" ] && fallos+=("rotación activa con $lambda")
+    [ "$replicas" -gt 0 ] && fallos+=("replicado en $replicas regiones")
+    [ "$primaria" != "us-east-2" ] && fallos+=("es réplica de un secreto de $primaria")
+    [ -n "$codigo" ] && fallos+=("nombre o ARN en el repositorio: $codigo")
+    [ "${en_stack:-0}" -gt 0 ] && fallos+=("es un recurso del stack pgguardian")
+    [ "$INSTANCIA_COINCIDENCIAS" -gt 0 ] && fallos+=("$INSTANCIA_COINCIDENCIAS coincidencias en .env o docker-compose.prod.yml de la Instancia")
+    [ -n "$borrado" ] && dudas+=("ya tiene borrado programado (DeletedDate=$borrado); ver 7.3.6")
+    if [ "$acceso" != "nunca" ]; then
+      if ! acc_s=$(date -u -d "$acceso" +%s 2>/dev/null); then
+        dudas+=("no se pudo interpretar LastAccessedDate=$acceso")
+      else
+        dias=$(( ($(date -u +%s) - acc_s) / 86400 ))
+        [ "$dias" -lt 30 ] && dudas+=("último acceso $acceso, hace $dias días (menos de 30)")
+        if [ -n "$creado_stack" ] && [ "$acc_s" -ge "$(date -u -d "${creado_stack%%T*}" +%s)" ]; then
+          dudas+=("último acceso $acceso desde la creación del stack ($creado_stack)")
+        fi
+      fi
+    fi
+  fi
+  if [ -n "$err" ]; then
+    estado="no_verificable"
+    detalle="$err; no se confirma el no uso: conservar el secreto (7.3.5)"
+  elif [ ${#fallos[@]} -gt 0 ]; then
+    estado="no_aprobado"
+    detalle="$nombre en uso: $(printf '%s; ' "${fallos[@]}" "${dudas[@]}" | sed 's/; $//'); conservar el secreto (7.3.5)"
+  elif [ ${#dudas[@]} -gt 0 ]; then
+    estado="no_verificable"
+    detalle="$nombre: no se puede confirmar el no uso: $(printf '%s; ' "${dudas[@]}" | sed 's/; $//'); conservar el secreto (7.3.5)"
+  else
+    origen="fuera del stack pgguardian"; [ -z "$creado_stack" ] && origen="stack pgguardian inexistente"
+    estado="aprobado"
+    detalle="$arn sin uso: sin OwningService, sin rotación ni réplicas, último acceso $acceso, sin coincidencias en el repositorio ($rama@$commit) ni en .env/docker-compose.prod.yml de la Instancia, $origen; listo para 7.3.4"
+  fi
+  jq -cn --arg c "$criterio" --arg r "$requisito" --arg e "$estado" --arg d "$detalle" \
+    '{criterio: $c, requisito: $r, estado: $e, detalle: $d}'
+) | tee -a docs/aws/evidencia/costos/verificacion-costos.jsonl
+```
+
+Cómo se interpreta:
+
+| Salida de la consulta | `estado` | Qué se hace | Requisito |
+| --- | --- | --- | --- |
+| Sin `OwningService`, rotación ni réplicas, sin acceso reciente, sin coincidencias en el repositorio ni en la Instancia y fuera del stack | `aprobado` | Se puede pasar a 7.3.4 | R27.2 |
+| `OwningService`, rotación activa, réplicas o secreto réplica | `no_aprobado` | Lo usa otro recurso de AWS; se conserva (7.3.5) | R27.2, R27.4 |
+| El nombre o el ARN aparecen en el repositorio, en el stack o en la Instancia | `no_aprobado` | Se conserva (7.3.5). Una coincidencia casual (p. ej. un nombre genérico) también se trata como uso | R27.2, R27.4 |
+| Último acceso en los últimos 30 días o desde la creación del stack, o fecha no interpretable | `no_verificable` | No se puede confirmar el no uso; se conserva (7.3.5) | R27.2, R27.4 |
+| El secreto ya tiene `DeletedDate` | `no_verificable` | No se vuelve a borrar; se revisa en 7.3.6 | R27.3 |
+| Falla `describe-secret`, `describe-stacks` o `list-stack-resources`, faltan variables o el bloque no corre en el clon | `no_verificable` | Se corrige la causa y se repite; mientras tanto, se conserva | R27.4 |
+
+Ejemplos de líneas:
+
+```json
+{"criterio":"Limpieza de la cuenta","requisito":"R27.1, R27.2","estado":"aprobado","detalle":"arn:aws:secretsmanager:us-east-2:<cuenta>:secret:<nombre>-XXXXXX sin uso: sin OwningService, sin rotación ni réplicas, último acceso 2026-03-02T00:00:00+00:00, sin coincidencias en el repositorio (main@1a2b3c4) ni en .env/docker-compose.prod.yml de la Instancia, fuera del stack pgguardian; listo para 7.3.4"}
+{"criterio":"Limpieza de la cuenta","requisito":"R27.1, R27.2","estado":"no_aprobado","detalle":"<nombre> en uso: rotación activa con arn:aws:lambda:us-east-2:<cuenta>:function:<funcion>; conservar el secreto (7.3.5)"}
+{"criterio":"Limpieza de la cuenta","requisito":"R27.1, R27.2","estado":"no_verificable","detalle":"<nombre>: no se puede confirmar el no uso: último acceso 2026-11-25T00:00:00+00:00, hace 3 días (menos de 30); conservar el secreto (7.3.5)"}
+```
+
+#### 7.3.4 Programar el borrado (R27.3, paso manual, modifica la cuenta)
+
+> **Atención.** Este paso programa el borrado del secreto. Pasada la ventana de recuperación, Secrets Manager lo borra con todas sus versiones y ya no se puede recuperar. Mientras dura la ventana, el secreto no se puede leer: cualquier sistema que lo use empieza a fallar, y así se descubre un uso que 7.3.3 no detectó. Se deshace con `restore-secret` (7.3.6).
+
+Condiciones previas, todas obligatorias:
+
+1. La última línea de 7.3.3 para este `SECRET_ID` en `verificacion-costos.jsonl` está en `aprobado` y es del mismo día.
+2. El Equipo confirma el borrado: al menos dos integrantes revisan la línea de 7.3.3 y aprueban el borrado por escrito (chat del Equipo o comentario en el repositorio). Sus nombres van en la línea de 7.3.4.
+3. Se elige la ventana de recuperación, entre 7 y 30 días. Se recomienda 30, el máximo, para tener más tiempo de deshacer el borrado.
+
+Primero se fija la ventana y se guarda la descripción del secreto como estaba antes del borrado (solo metadatos, sin el valor):
+
+```bash
+VENTANA=30   # días de recuperación, de 7 a 30
+if [[ "$VENTANA" =~ ^[0-9]+$ ]] && [ "$VENTANA" -ge 7 ] && [ "$VENTANA" -le 30 ]; then
+  echo "ventana de $VENTANA días"
+else
+  echo "VENTANA=$VENTANA fuera de 7..30: corregir antes de seguir"
+fi
+SELLO_BORRADO=$(date -u +%Y%m%dT%H%MZ)
+aws secretsmanager describe-secret --region us-east-2 --secret-id "$SECRET_ID" --output json \
+  | tee "docs/aws/evidencia/costos/secreto-antes-$SELLO_BORRADO.json"
+```
+
+Después, con la confirmación del Equipo, un integrante escribe y ejecuta solo este comando. **Nunca se añade `--force-delete-without-recovery`**: borra el secreto en el acto, sin ventana, y no se puede deshacer.
+
+```bash
+PEDIDO=$(date -u +%s)
+aws secretsmanager delete-secret --region us-east-2 --secret-id "$SECRET_ID" \
+  --recovery-window-in-days "$VENTANA" --output json \
+  | tee "docs/aws/evidencia/costos/secreto-delete-$SELLO_BORRADO.json"
+```
+
+Resultado esperado: el ARN, el nombre y `DeletionDate`, la fecha en que termina la ventana (la hora del pedido más `VENTANA` días).
+
+```json
+{
+    "ARN": "arn:aws:secretsmanager:us-east-2:<cuenta>:secret:<nombre>-XXXXXX",
+    "Name": "<nombre>",
+    "DeletionDate": "2026-12-28T10:15:00.123000+00:00"
+}
+```
+
+Verificación con `describe-secret`. Pegar el bloque completo en CloudShell en la misma sesión:
+
+```bash
+(
+  criterio="Limpieza de la cuenta"; requisito="R27.3"
+  resp="docs/aws/evidencia/costos/secreto-delete-${SELLO_BORRADO:-}.json"
+  if [ -z "${SECRET_ID:-}" ] || [ -z "${PEDIDO:-}" ] || [ -z "${SELLO_BORRADO:-}" ] || [ ! -s "$resp" ]; then
+    estado="no_verificable"
+    detalle="faltan SECRET_ID, PEDIDO, SELLO_BORRADO o la respuesta de delete-secret ($resp)"
+  elif ! sec=$(aws secretsmanager describe-secret --region us-east-2 --secret-id "$SECRET_ID" --output json 2>&1); then
+    if grep -q 'ResourceNotFoundException' <<< "$sec"; then
+      estado="no_aprobado"
+      detalle="no conforme: el secreto ya no existe; se borró sin ventana de recuperación"
+    else
+      estado="no_verificable"
+      detalle="falló describe-secret: $(echo "$sec" | tr '\n' ' ')"
+    fi
+  else
+    borrado=$(jq -r '.DeletedDate // empty' <<< "$sec")
+    fin=$(jq -r '.DeletionDate // empty' "$resp")
+    if [ -z "$borrado" ]; then
+      estado="no_aprobado"
+      detalle="no conforme: describe-secret sin DeletedDate; el borrado no quedó programado"
+    elif [ -z "$fin" ] || ! fin_s=$(date -u -d "$fin" +%s 2>/dev/null); then
+      estado="no_verificable"
+      detalle="la respuesta de delete-secret no trae una DeletionDate interpretable ($fin)"
+    else
+      dias=$(( (fin_s - PEDIDO + 43200) / 86400 ))
+      if [ "$dias" -lt 7 ] || [ "$dias" -gt 30 ]; then
+        estado="no_aprobado"
+        detalle="no conforme: ventana de recuperación de $dias días (se esperaban de 7 a 30); DeletionDate=$fin"
+      else
+        estado="aprobado"
+        detalle="$(jq -r '.Name' <<< "$sec"): borrado programado (DeletedDate=$borrado), ventana de $dias días, borrado efectivo $fin, sin --force-delete-without-recovery; aprobaron <nombre1> y <nombre2>"
+      fi
+    fi
+  fi
+  jq -cn --arg c "$criterio" --arg r "$requisito" --arg e "$estado" --arg d "$detalle" \
+    '{criterio: $c, requisito: $r, estado: $e, detalle: $d}'
+) | tee -a docs/aws/evidencia/costos/verificacion-costos.jsonl
+```
+
+Antes de versionar la línea, `<nombre1>` y `<nombre2>` se reemplazan por los integrantes que aprobaron el borrado. `DeletedDate` de `describe-secret` indica que el borrado está programado; la documentación de AWS no deja claro si esa fecha es la del pedido o la del borrado efectivo, así que la fecha que se anota como borrado efectivo es la `DeletionDate` de la respuesta de `delete-secret`. Durante la ventana, el secreto sigue en `list-secrets --include-planned-deletion` con su `DeletedDate`.
+
+Ejemplo de línea:
+
+```json
+{"criterio":"Limpieza de la cuenta","requisito":"R27.3","estado":"aprobado","detalle":"<nombre>: borrado programado (DeletedDate=2026-11-28T10:15:00.123000+00:00), ventana de 30 días, borrado efectivo 2026-12-28T10:15:00.123000+00:00, sin --force-delete-without-recovery; aprobaron Ana Pérez y Luis Gómez"}
+```
+
+#### 7.3.5 Conservar el secreto y registrar el motivo (R27.4)
+
+Si 7.3.3 queda en `no_aprobado` o `no_verificable`, o si el Equipo no da la confirmación de 7.3.4, el secreto se conserva y **no se programa su borrado**. El motivo se registra en la misma evidencia de esta sección, con una línea anotada a mano en `docs/aws/evidencia/costos/verificacion-costos.jsonl`. La línea de 7.3.3 que la causó se conserva:
+
+```json
+{"criterio":"Limpieza de la cuenta","requisito":"R27.4","estado":"aprobado","detalle":"<nombre> (<arn>) conservado sin borrado programado: <motivo, p. ej. último acceso hace 3 días, o rotación activa con <funcion>, o falta confirmación del Equipo>; línea de 7.3.3 del AAAA-MM-DD; decidió <nombre>"}
+```
+
+`aprobado` en esta línea indica que se cumplió R27.4: el secreto se conservó y el motivo quedó registrado. El costo del secreto sigue en el gasto mensual que vigila el presupuesto (7.1). Cuando cambie la causa (p. ej. pasan 30 días sin acceso o se identifica y se retira quien lo usa), se repite la sección desde 7.3.1.
+
+#### 7.3.6 Deshacer el borrado y resumen
+
+Si durante la ventana de recuperación algo falla por falta del secreto, o el Equipo cambia de decisión, se cancela el borrado programado. El comando modifica la cuenta y también requiere la confirmación del Equipo:
+
+```bash
+aws secretsmanager restore-secret --region us-east-2 --secret-id "$SECRET_ID" --output json \
+  | tee "docs/aws/evidencia/costos/secreto-restore-$(date -u +%Y%m%dT%H%MZ).json"
+aws secretsmanager describe-secret --region us-east-2 --secret-id "$SECRET_ID" \
+  --query '{Nombre: Name, DeletedDate: DeletedDate}' --output table
+```
+
+Resultado esperado: `restore-secret` devuelve el ARN y el nombre, y `describe-secret` muestra `DeletedDate` vacío (`None`). Después se aplica 7.3.5 con el motivo de la restauración. `restore-secret` solo funciona antes de la `DeletionDate`; pasada esa fecha, el secreto ya no existe.
+
+| Situación | Bloques y líneas necesarios para cumplir R27 |
+| --- | --- |
+| No hay secretos en `us-east-2` | 7.3.1 (línea R27.1 anotada a mano) |
+| Secreto sin uso, borrado programado | 7.3.1, 7.3.2 (captura), 7.3.3 en `aprobado` y 7.3.4 en `aprobado` |
+| No se puede confirmar el no uso, o el secreto está en uso | 7.3.1, 7.3.2 si se pudo hacer, 7.3.3 con su resultado y 7.3.5 en `aprobado` |
+| Borrado programado y luego restaurado | Las líneas de 7.3.3 y 7.3.4, la salida de `restore-secret` y 7.3.5 en `aprobado` |
+
+R27 nunca se da por cumplido con el secreto borrado sin ventana de recuperación ni con un borrado programado sin la línea de 7.3.3 en `aprobado`.
 
 ## 8. Snapshots
 
-Pendiente: tarea 7.3 (alarma de recuperación automática), tarea 7.4 (snapshots de estabilización) y tarea 7.5 (snapshots previos a la grabación del video).
+Trazabilidad: componentes C11 y C15 del diseño · RF-07.3, RF-07.4 · CA-25, CA-26 · R22, R23 · T-21, T-22, T-27.
+
+Las líneas «Resultado de verificación» de esta sección se guardan en `docs/aws/evidencia/snapshots/verificacion-snapshots.jsonl` (p. ej. terminando el bloque con `| tee -a docs/aws/evidencia/snapshots/verificacion-snapshots.jsonl`). Antes de versionar los archivos de evidencia, el ID de la cuenta se reemplaza por `<cuenta>`, como en `docs/aws/evidencia/stack/`.
+
+### 8.1 Alarma de recuperación automática (T-21 · RF-07.3 · CA-25 · R22)
+
+La alarma la crea la plantilla: recurso `RecoverAlarm` (`AWS::CloudWatch::Alarm`) con el nombre `PgGuardian-Recover`, sobre la métrica `StatusCheckFailed_System` (espacio `AWS/EC2`, dimensión `InstanceId` = output `InstanceId` del stack), estadística `Maximum`, periodo de 60 s, `GreaterThanOrEqualToThreshold` 1, 2 periodos de evaluación, `TreatMissingData: notBreaching` y una sola acción, `arn:aws:automate:us-east-2:ec2:recover`. 8.1.2 solo lee la alarma; 8.1.3 fuerza su estado para probar la acción.
+
+Condiciones:
+
+| Condición | Requisito | Verificación |
+| --- | --- | --- |
+| Existe la alarma `PgGuardian-Recover` en `us-east-2` y es el recurso `RecoverAlarm` del stack | R22.1 | 8.1.2 |
+| `AWS/EC2` `StatusCheckFailed_System`, dimensión única `InstanceId` igual al output del stack | R22.1 | 8.1.2 |
+| `Maximum`, `Period=60`, `Threshold=1`, `GreaterThanOrEqualToThreshold`, `EvaluationPeriods=2` (y `DatapointsToAlarm` ausente o 2) | R22.1 | 8.1.2 |
+| `AlarmActions` es exactamente `arn:aws:automate:us-east-2:ec2:recover`, con `ActionsEnabled=true`, y el tipo de la Instancia admite la recuperación (`AutoRecoverySupported=true`) | R22.2 | 8.1.2 |
+| Sin `OKActions` ni `InsufficientDataActions` (la vuelta a OK de 8.1.3 no ejecuta nada) | R22.2 | 8.1.2 |
+| `TreatMissingData=notBreaching` | R22.3 | 8.1.2 |
+| Al pasar a ALARM, la alarma ejecuta la acción en 60 s o menos | R22.2 | 8.1.3 |
+| Tras una recuperación, la Instancia conserva su ID, su IP privada, la Elastic IP y sus volúmenes | R22.4 | 8.1.3 |
+
+CA-25 («la alarma existe en `us-east-2` con la acción `arn:aws:automate:us-east-2:ec2:recover`») depende solo de 8.1.2. La prueba de 8.1.3 aporta evidencia de R22.2 y R22.4, pero no es una condición previa de CA-25, igual que 7.1.4 para CA-24.
+
+#### 8.1.1 Preparación en CloudShell
+
+Se ejecuta en CloudShell (`us-east-2`, Usuario_IAM con MFA). Primero el bloque de 3.2, que define `INSTANCE_ID`, `PUBLIC_IP` y la función `ssm_run` (la usa 8.1.3); después este:
+
+```bash
+mkdir -p docs/aws/evidencia/snapshots
+ALARM_NAME="PgGuardian-Recover"
+RECOVER_ARN="arn:aws:automate:us-east-2:ec2:recover"
+STACK_ALARM_NAME=$(aws cloudformation describe-stack-resource --stack-name pgguardian \
+  --logical-resource-id RecoverAlarm --query 'StackResourceDetail.PhysicalResourceId' --output text)
+INSTANCE_TYPE=$(aws ec2 describe-instances --instance-ids "$INSTANCE_ID" \
+  --query 'Reservations[0].Instances[0].InstanceType' --output text)
+echo "region=${AWS_REGION:-?} instancia=$INSTANCE_ID tipo=$INSTANCE_TYPE alarma=$ALARM_NAME alarma_del_stack=$STACK_ALARM_NAME"
+```
+
+Resultado esperado: `region=us-east-2`, un `i-...`, `t3.small`, y `PgGuardian-Recover` dos veces (el identificador físico de una alarma de CloudFormation es su nombre). Ningún valor vacío ni `None`. Si la sesión de CloudShell se reinicia, se repiten 3.2 y este bloque.
+
+#### 8.1.2 Verificación con `aws cloudwatch describe-alarms` (R22.1, R22.2, R22.3)
+
+Consulta directa, para guardar la salida en la evidencia:
+
+```bash
+SELLO=$(date -u +%Y%m%dT%H%MZ)
+aws cloudwatch describe-alarms --alarm-names "$ALARM_NAME" --alarm-types MetricAlarm \
+  --query 'MetricAlarms[0].{AlarmName: AlarmName, AlarmArn: AlarmArn, Namespace: Namespace, MetricName: MetricName, Dimensions: Dimensions, Statistic: Statistic, Period: Period, EvaluationPeriods: EvaluationPeriods, DatapointsToAlarm: DatapointsToAlarm, Threshold: Threshold, ComparisonOperator: ComparisonOperator, TreatMissingData: TreatMissingData, ActionsEnabled: ActionsEnabled, AlarmActions: AlarmActions, OKActions: OKActions, InsufficientDataActions: InsufficientDataActions, StateValue: StateValue}' \
+  --output json | tee "docs/aws/evidencia/snapshots/describe-alarms-$SELLO.json"
+aws ec2 describe-instance-types --instance-types "$INSTANCE_TYPE" \
+  --query 'InstanceTypes[0].{InstanceType: InstanceType, AutoRecoverySupported: AutoRecoverySupported}' \
+  --output json | tee -a "docs/aws/evidencia/snapshots/describe-alarms-$SELLO.json"
+```
+
+Resultado esperado (`StateValue` es `OK` con la Instancia sana; justo después de crear el stack puede ser `INSUFFICIENT_DATA` unos minutos; `DatapointsToAlarm` no aparece porque la plantilla no lo define y vale lo mismo que `EvaluationPeriods`):
+
+```json
+{
+    "AlarmName": "PgGuardian-Recover",
+    "AlarmArn": "arn:aws:cloudwatch:us-east-2:<cuenta>:alarm:PgGuardian-Recover",
+    "Namespace": "AWS/EC2",
+    "MetricName": "StatusCheckFailed_System",
+    "Dimensions": [
+        {
+            "Name": "InstanceId",
+            "Value": "i-..."
+        }
+    ],
+    "Statistic": "Maximum",
+    "Period": 60,
+    "EvaluationPeriods": 2,
+    "DatapointsToAlarm": null,
+    "Threshold": 1.0,
+    "ComparisonOperator": "GreaterThanOrEqualToThreshold",
+    "TreatMissingData": "notBreaching",
+    "ActionsEnabled": true,
+    "AlarmActions": [
+        "arn:aws:automate:us-east-2:ec2:recover"
+    ],
+    "OKActions": [],
+    "InsufficientDataActions": [],
+    "StateValue": "OK"
+}
+{
+    "InstanceType": "t3.small",
+    "AutoRecoverySupported": true
+}
+```
+
+Evaluación automática del criterio. Pegar el bloque completo en CloudShell después de 8.1.1:
+
+```bash
+(
+  criterio="CA-25"; requisito="R22.1, R22.2, R22.3"
+  if [ -z "${INSTANCE_ID:-}" ] || [ "$INSTANCE_ID" = "None" ] || [ -z "${ALARM_NAME:-}" ] \
+     || [ -z "${RECOVER_ARN:-}" ] || [ -z "${STACK_ALARM_NAME:-}" ] || [ "$STACK_ALARM_NAME" = "None" ] \
+     || [ -z "${INSTANCE_TYPE:-}" ] || [ "$INSTANCE_TYPE" = "None" ]; then
+    estado="no_verificable"
+    detalle="faltan INSTANCE_ID, ALARM_NAME, RECOVER_ARN, STACK_ALARM_NAME o INSTANCE_TYPE; ejecutar antes 3.2 y 8.1.1"
+  elif ! salida=$(aws cloudwatch describe-alarms --alarm-names "$ALARM_NAME" \
+        --alarm-types MetricAlarm --output json 2>&1); then
+    estado="no_verificable"
+    detalle="falló aws cloudwatch describe-alarms: $(echo "$salida" | tr '\n' ' ')"
+  elif [ "$(jq '(.MetricAlarms // []) | length' <<< "$salida")" -eq 0 ]; then
+    estado="no_aprobado"
+    detalle="no conforme: la alarma $ALARM_NAME no existe en ${AWS_REGION:-la región de la sesión} (R22.1)"
+  elif ! soporta=$(aws ec2 describe-instance-types --instance-types "$INSTANCE_TYPE" \
+        --query 'InstanceTypes[0].AutoRecoverySupported' --output text 2>&1); then
+    estado="no_verificable"
+    detalle="falló aws ec2 describe-instance-types: $(echo "$soporta" | tr '\n' ' ')"
+  else
+    valores=$(jq -r 'def v(f): (f) as $x | if $x == null then "ausente" else ($x | tostring) end;
+      .MetricAlarms[0] | [v(.AlarmArn), v(.Namespace), v(.MetricName), v(.Statistic), v(.Period),
+        v(.EvaluationPeriods), v(.DatapointsToAlarm), v(.Threshold), v(.ComparisonOperator),
+        v(.TreatMissingData), v(.ActionsEnabled), v(.StateValue)] | @tsv' <<< "$salida")
+    IFS=$'\t' read -r arn ns metrica estadistica periodo evaluaciones puntos umbral operador \
+      faltantes activas estado_alarma <<< "$valores"
+    dims=$(jq -c '[(.MetricAlarms[0].Dimensions // [])[] | "\(.Name)=\(.Value)"]' <<< "$salida")
+    acciones=$(jq -c '.MetricAlarms[0].AlarmActions // []' <<< "$salida")
+    otras=$(jq '((.MetricAlarms[0].OKActions // []) + (.MetricAlarms[0].InsufficientDataActions // [])) | length' <<< "$salida")
+    # DatapointsToAlarm y TreatMissingData pueden faltar: se evalúan como condiciones, no como ausentes.
+    ausentes=()
+    for par in "AlarmArn=$arn" "Namespace=$ns" "MetricName=$metrica" "Statistic=$estadistica" \
+               "Period=$periodo" "EvaluationPeriods=$evaluaciones" "Threshold=$umbral" \
+               "ComparisonOperator=$operador" "ActionsEnabled=$activas" "StateValue=$estado_alarma"; do
+      [ "${par#*=}" = "ausente" ] && ausentes+=("${par%%=*}")
+    done
+    if [ ${#ausentes[@]} -gt 0 ]; then
+      estado="no_verificable"
+      detalle="la respuesta no trae: ${ausentes[*]}"
+    else
+      fallos=()
+      [[ "$arn" == arn:aws:cloudwatch:us-east-2:* ]] || fallos+=("AlarmArn=$arn (se esperaba la región us-east-2)")
+      [ "$STACK_ALARM_NAME" != "$ALARM_NAME" ] \
+        && fallos+=("el recurso RecoverAlarm del stack es $STACK_ALARM_NAME (se esperaba $ALARM_NAME)")
+      [ "$ns" != "AWS/EC2" ] && fallos+=("Namespace=$ns (se esperaba AWS/EC2)")
+      [ "$metrica" != "StatusCheckFailed_System" ] && fallos+=("MetricName=$metrica (se esperaba StatusCheckFailed_System)")
+      [ "$dims" != "[\"InstanceId=$INSTANCE_ID\"]" ] && fallos+=("Dimensions=$dims (se esperaba solo InstanceId=$INSTANCE_ID)")
+      [ "$estadistica" != "Maximum" ] && fallos+=("Statistic=$estadistica (se esperaba Maximum)")
+      [ "$periodo" != "60" ] && fallos+=("Period=$periodo (se esperaba 60)")
+      jq -en --arg a "$umbral" '($a | tonumber) == 1' > /dev/null 2>&1 \
+        || fallos+=("Threshold=$umbral (se esperaba 1)")
+      [ "$operador" != "GreaterThanOrEqualToThreshold" ] \
+        && fallos+=("ComparisonOperator=$operador (se esperaba GreaterThanOrEqualToThreshold)")
+      [ "$evaluaciones" != "2" ] && fallos+=("EvaluationPeriods=$evaluaciones (se esperaba 2)")
+      { [ "$puntos" = "ausente" ] || [ "$puntos" = "2" ]; } \
+        || fallos+=("DatapointsToAlarm=$puntos (se esperaba ausente o 2)")
+      [ "$faltantes" != "notBreaching" ] \
+        && fallos+=("TreatMissingData=$faltantes (se esperaba notBreaching; ausente equivale a missing) (R22.3)")
+      [ "$acciones" != "[\"$RECOVER_ARN\"]" ] && fallos+=("AlarmActions=$acciones (se esperaba solo $RECOVER_ARN) (R22.2)")
+      [ "$activas" != "true" ] && fallos+=("ActionsEnabled=$activas (se esperaba true) (R22.2)")
+      [ "$otras" -ne 0 ] && fallos+=("$otras acciones en OKActions o InsufficientDataActions (se esperaban 0)")
+      [ "$soporta" != "True" ] && fallos+=("$INSTANCE_TYPE con AutoRecoverySupported=$soporta (se esperaba True) (R22.2)")
+      if [ ${#fallos[@]} -eq 0 ]; then
+        estado="aprobado"
+        detalle="$ALARM_NAME (recurso RecoverAlarm del stack) en us-east-2: AWS/EC2 StatusCheckFailed_System, InstanceId=$INSTANCE_ID, Maximum, 60 s, >= 1, 2 periodos, TreatMissingData=notBreaching, AlarmActions=[$RECOVER_ARN], ActionsEnabled=true; $INSTANCE_TYPE con AutoRecoverySupported=true; estado actual $estado_alarma"
+      else
+        estado="no_aprobado"
+        detalle="no conforme: $(printf '%s; ' "${fallos[@]}" | sed 's/; $//')"
+      fi
+    fi
+  fi
+  jq -cn --arg c "$criterio" --arg r "$requisito" --arg e "$estado" --arg d "$detalle" \
+    '{criterio: $c, requisito: $r, estado: $e, detalle: $d}'
+)
+```
+
+Cómo se interpreta:
+
+| Salida de la consulta | `estado` | `detalle` | Requisito |
+| --- | --- | --- | --- |
+| Todos los valores coinciden con lo esperado | `aprobado` | Los valores observados y el estado actual de la alarma | R22.1 a R22.3 |
+| La alarma no existe en la región de la sesión | `no_aprobado` | `la alarma PgGuardian-Recover no existe ...` | R22.1 |
+| ARN de otra región, otro espacio, otra métrica, otra dimensión o un `InstanceId` distinto del output del stack | `no_aprobado` | Cada valor que falló, separados por `;` | R22.1 |
+| Otra estadística, periodo, umbral, operador o número de periodos | `no_aprobado` | Cada valor que falló | R22.1 |
+| Acción distinta o adicional, `ActionsEnabled=false` o tipo de instancia sin `AutoRecoverySupported` | `no_aprobado` | Cada valor que falló | R22.2 |
+| `TreatMissingData` distinto de `notBreaching` o ausente | `no_aprobado` | `TreatMissingData=... (se esperaba notBreaching ...)` | R22.3 |
+| Falla la CLI, faltan variables o falta algún valor en la respuesta | `no_verificable` | El mensaje de error o los valores que faltaron | — |
+
+`StateValue=ALARM` no cambia el `estado` de la línea (la configuración puede ser correcta), pero indica que la comprobación de estado del sistema está fallando en ese momento: se revisa en **EC2** → **Instances** → **Status checks** y no se ejecuta 8.1.3. Con `TreatMissingData=notBreaching`, una Instancia detenida no publica la métrica y la alarma sigue en `OK` sin ejecutar la acción (R22.3); se puede observar repitiendo la consulta directa durante 6.2.
+
+AWS recomienda `missing` para las alarmas con acciones de EC2, para que una interrupción del envío de métricas no las dispare ([CloudWatch: acciones de alarma sobre EC2](https://docs.aws.amazon.com/AmazonCloudWatch/latest/monitoring/UsingAlarmActions.html)). R22.3 pide `notBreaching`, que tampoco ejecuta la acción ante datos faltantes; la diferencia es que la alarma queda en `OK` en lugar de `INSUFFICIENT_DATA`.
+
+Ejemplos de líneas:
+
+```json
+{"criterio":"CA-25","requisito":"R22.1, R22.2, R22.3","estado":"aprobado","detalle":"PgGuardian-Recover (recurso RecoverAlarm del stack) en us-east-2: AWS/EC2 StatusCheckFailed_System, InstanceId=i-0abc..., Maximum, 60 s, >= 1, 2 periodos, TreatMissingData=notBreaching, AlarmActions=[arn:aws:automate:us-east-2:ec2:recover], ActionsEnabled=true; t3.small con AutoRecoverySupported=true; estado actual OK"}
+{"criterio":"CA-25","requisito":"R22.1, R22.2, R22.3","estado":"no_aprobado","detalle":"no conforme: TreatMissingData=missing (se esperaba notBreaching; ausente equivale a missing) (R22.3)"}
+{"criterio":"CA-25","requisito":"R22.1, R22.2, R22.3","estado":"no_verificable","detalle":"falló aws cloudwatch describe-alarms: An error occurred (AccessDenied) ..."}
+```
+
+#### 8.1.3 Prueba con `aws cloudwatch set-alarm-state` (R22.2, R22.4, modifica: fuerza el estado de la alarma y puede reiniciar la Instancia)
+
+> **Atención.** `set-alarm-state` cambia el estado de la alarma de forma temporal y, cuando el estado cambia, CloudWatch ejecuta la acción configurada para el nuevo estado ([AWS CLI: set-alarm-state](https://docs.aws.amazon.com/cli/latest/reference/cloudwatch/set-alarm-state.html)). Aquí esa acción es la recuperación de EC2, así que la prueba **envía una solicitud real de recuperación** para la Instancia. AWS no documenta qué hace EC2 con esa solicitud cuando la Instancia está sana. Según AWS, la recuperación solo actúa cuando la Instancia está deteriorada ([AWS News Blog](https://aws.amazon.com/blogs/aws/new-amazon-cloudwatch-action-reboot-ec2-instance/)), así que lo más probable es que no pase nada. Aun así, se trata la prueba como si pudiera haber una recuperación: si EC2 la ejecuta, la Instancia se mueve de host con un reinicio no planificado, se pierde lo que haya en RAM y la aplicación deja de responder unos minutos ([EC2: recuperación por alarma](https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/cloudwatch-recovery.html)). Por eso:
+>
+> - Se avisa al Equipo y se ejecuta cuando se acepte una caída de unos minutos, nunca durante una demostración ni en las 24 h previas a grabar el video.
+> - Si ya existen, se ejecuta después de los snapshots de estabilización (tarea 7.4).
+> - Se ejecuta **una sola vez**. EC2 limita los intentos de recuperación por día, y no conviene gastarlos en pruebas.
+> - Solo se ejecuta con la alarma en `OK` y con 8.1.2 en `aprobado`.
+
+El bloque guarda la identidad de la Instancia y el `boot_id` del kernel, fuerza `ALARM` y espera a que la alarma vuelva sola a `OK` (la métrica real sigue en 0). Si en 180 s no vuelve, la fuerza a `OK`; como la alarma no tiene `OKActions` (8.1.2), eso no ejecuta nada. Después lee el historial con `describe-alarm-history`, espera a que la Instancia esté `running` con las comprobaciones de estado en `ok` y compara. Si el `boot_id` cambió, hubo un reinicio, es decir, EC2 ejecutó la recuperación. Imprime dos líneas, una para R22.2 y otra para R22.4:
+
+```bash
+(
+  criterio="CA-25"
+  ev="docs/aws/evidencia/snapshots"; sello=$(date -u +%Y%m%dT%H%MZ)
+  linea() { jq -cn --arg c "$criterio" --arg r "$1" --arg e "$2" --arg d "$3" \
+    '{criterio: $c, requisito: $r, estado: $e, detalle: $d}'; }
+  ambas() { linea "R22.2" "$1" "$2"; linea "R22.4" "$1" "$2"; }
+  estado_alarma() { aws cloudwatch describe-alarms --alarm-names "$ALARM_NAME" \
+    --query 'MetricAlarms[0].StateValue' --output text 2>/dev/null; }
+  # ID, estado, IP privada, IP pública, a qué instancia apunta la Elastic IP y volúmenes adjuntos.
+  foto() {
+    local inst eip
+    inst=$(aws ec2 describe-instances --instance-ids "$INSTANCE_ID" --output json 2>/dev/null) || return 1
+    eip=$(aws ec2 describe-addresses --public-ips "$PUBLIC_IP" \
+      --query 'Addresses[0].InstanceId' --output text 2>/dev/null) || return 1
+    jq -c --arg eip "$eip" '.Reservations[0].Instances[0]
+      | {InstanceId, Estado: .State.Name, IpPrivada: .PrivateIpAddress, IpPublica: .PublicIpAddress,
+         EipAsociadaA: $eip, Volumenes: ([.BlockDeviceMappings[].Ebs.VolumeId] | sort)}' <<< "$inst"
+  }
+  if [ -z "${INSTANCE_ID:-}" ] || [ -z "${PUBLIC_IP:-}" ] || [ -z "${ALARM_NAME:-}" ] \
+     || [ -z "${RECOVER_ARN:-}" ] || ! declare -F ssm_run >/dev/null; then
+    ambas no_verificable "faltan INSTANCE_ID, PUBLIC_IP, ALARM_NAME, RECOVER_ARN o ssm_run; ejecutar 3.2 y 8.1.1"; exit 0
+  fi
+  st0=$(estado_alarma)
+  if [ "$st0" != "OK" ]; then
+    ambas no_verificable "la alarma está en ${st0:-un estado desconocido}; la prueba solo se hace con la alarma en OK"; exit 0
+  fi
+  if ! antes=$(foto) || ! boot0=$(ssm_run 'cat /proc/sys/kernel/random/boot_id') || [ -z "$boot0" ]; then
+    ambas no_verificable "no se pudo leer la Instancia o el boot_id antes de la prueba; revisar 3.4.3"; exit 0
+  fi
+  echo "$antes" > "$ev/recover-antes-$sello.json"
+
+  # 1. ALARM forzado y vuelta a OK.
+  inicio=$(date -u +%Y-%m-%dT%H:%M:%SZ); sleep 1
+  if ! err=$(aws cloudwatch set-alarm-state --alarm-name "$ALARM_NAME" --state-value ALARM \
+        --state-reason "Prueba T-21 (runbook 8.1.3): ALARM forzado a mano" 2>&1); then
+    ambas no_verificable "falló aws cloudwatch set-alarm-state: $(echo "$err" | tr '\n' ' ')"; exit 0
+  fi
+  SECONDS=0; vuelta=""
+  while [ "$SECONDS" -lt 180 ]; do
+    sleep 10
+    [ "$(estado_alarma)" = "OK" ] && { vuelta="sola en ${SECONDS} s"; break; }
+  done
+  if [ -z "$vuelta" ]; then
+    aws cloudwatch set-alarm-state --alarm-name "$ALARM_NAME" --state-value OK \
+      --state-reason "Prueba T-21 (runbook 8.1.3): vuelta manual a OK" > /dev/null 2>&1
+    vuelta="forzada a mano tras 180 s"
+  fi
+
+  # 2. Historial: paso a ALARM, entrada Action y vuelta a OK (R22.2).
+  sleep 30
+  if ! hist=$(aws cloudwatch describe-alarm-history --alarm-name "$ALARM_NAME" \
+        --start-date "$inicio" --output json 2>&1); then
+    e2="no_verificable"; d2="falló aws cloudwatch describe-alarm-history: $(echo "$hist" | tr '\n' ' ')"
+  else
+    echo "$hist" > "$ev/recover-historial-$sello.json"
+    items=$(jq -c '(.AlarmHistoryItems // []) | sort_by(.Timestamp)' <<< "$hist")
+    t_alarm=$(jq -r '[.[] | select(.HistoryItemType == "StateUpdate" and ((.HistorySummary // "") | test("to ALARM")))][0].Timestamp // ""' <<< "$items")
+    t_ok=$(jq -r '[.[] | select(.HistoryItemType == "StateUpdate" and ((.HistorySummary // "") | test("to OK")))][0].Timestamp // ""' <<< "$items")
+    accion=$(jq -c '[.[] | select(.HistoryItemType == "Action")][0] // ""' <<< "$items")
+    if [ -z "$t_alarm" ]; then
+      e2="no_verificable"; d2="el historial no registra el paso a ALARM desde $inicio"
+    elif [ "$accion" = '""' ]; then
+      e2="no_aprobado"
+      d2="no conforme: sin entrada Action en el historial tras el paso a ALARM ($t_alarm); revisar ActionsEnabled y AlarmActions (8.1.2)"
+    else
+      t_acc=$(jq -r '.Timestamp' <<< "$accion"); resumen=$(jq -r '.HistorySummary // ""' <<< "$accion")
+      dt=$(( $(date -u -d "$t_acc" +%s) - $(date -u -d "$t_alarm" +%s) ))
+      if grep -qF "$RECOVER_ARN" <<< "$resumen" && grep -qi 'success' <<< "$resumen"; then
+        if [ "$dt" -le 60 ]; then
+          e2="aprobado"
+          d2="ALARM a las $t_alarm; acción ejecutada $dt s después: $resumen; vuelta a OK $vuelta (${t_ok:-sin registro})"
+        else
+          e2="no_aprobado"; d2="no conforme: acción ejecutada $dt s después del paso a ALARM (máximo 60 s): $resumen"
+        fi
+      elif grep -qi 'fail' <<< "$resumen"; then
+        e2="no_verificable"; d2="CloudWatch intentó la acción $dt s después del paso a ALARM, pero falló: $resumen"
+      else
+        e2="no_verificable"; d2="entrada Action no reconocida $dt s después del paso a ALARM: $resumen"
+      fi
+    fi
+  fi
+  linea "R22.2" "$e2" "$d2"
+
+  # 3. Estado de la Instancia después de la prueba (R22.4).
+  sleep 60
+  aws ec2 wait instance-running --instance-ids "$INSTANCE_ID" 2>/dev/null
+  aws ec2 wait instance-status-ok --instance-ids "$INSTANCE_ID" 2>/dev/null
+  boot1=""; SECONDS=0
+  while [ "$SECONDS" -lt 300 ]; do
+    boot1=$(ssm_run 'cat /proc/sys/kernel/random/boot_id' 2>/dev/null) && [ -n "$boot1" ] && break
+    sleep 10
+  done
+  despues=$(foto); sb=$(ssm_run 'findmnt -n -o SOURCE /srv/sandbox' 2>/dev/null)
+  [ -n "$despues" ] && echo "$despues" > "$ev/recover-despues-$sello.json"
+  if [ -z "$despues" ] || [ -z "$boot1" ]; then
+    e4="no_verificable"
+    d4="no se pudo leer la Instancia o el boot_id después de la prueba; revisar 3.4.3 y la salida de consola (get-console-output)"
+  else
+    fallos=()
+    for campo in InstanceId IpPrivada Volumenes; do
+      a=$(jq -c ".$campo" <<< "$antes"); b=$(jq -c ".$campo" <<< "$despues")
+      [ "$a" != "$b" ] && fallos+=("$campo cambió de $a a $b")
+    done
+    [ "$(jq -r '.EipAsociadaA' <<< "$despues")" != "$INSTANCE_ID" ] \
+      && fallos+=("la Elastic IP $PUBLIC_IP apunta a $(jq -r '.EipAsociadaA' <<< "$despues") (se esperaba $INSTANCE_ID)")
+    [ "$(jq -r '.IpPublica' <<< "$despues")" != "$PUBLIC_IP" ] \
+      && fallos+=("IP pública $(jq -r '.IpPublica' <<< "$despues") (se esperaba $PUBLIC_IP)")
+    [ "$(jq -r '.Estado' <<< "$despues")" != "running" ] && fallos+=("estado EC2 $(jq -r '.Estado' <<< "$despues")")
+    [ -z "$sb" ] && fallos+=("/srv/sandbox no montado después de la prueba")
+    valores="InstanceId, IP privada $(jq -r '.IpPrivada' <<< "$despues"), Elastic IP $PUBLIC_IP y volúmenes $(jq -r '.Volumenes | join(",")' <<< "$despues") sin cambios; /srv/sandbox desde $sb"
+    if [ ${#fallos[@]} -gt 0 ]; then
+      e4="no_aprobado"; d4="no conforme: $(printf '%s; ' "${fallos[@]}" | sed 's/; $//')"
+    elif [ "$boot1" = "$boot0" ]; then
+      e4="no_verificable"
+      d4="EC2 no ejecutó una recuperación real (boot_id sin cambio): $valores; R22.4 solo se demuestra con una recuperación"
+    else
+      e4="aprobado"; d4="recuperación con reinicio (boot_id cambió): $valores"
+    fi
+  fi
+  linea "R22.4" "$e4" "$d4"
+)
+```
+
+Duración: entre 5 y 20 minutos. La espera más larga es `instance-status-ok`, de hasta 10 min si hubo recuperación. La salida de cada paso queda en `docs/aws/evidencia/snapshots/`: `recover-antes-*.json`, `recover-historial-*.json` y `recover-despues-*.json`.
+
+Para revisar el historial a mano (o en la consola: **CloudWatch** → **Alarms** → `PgGuardian-Recover` → **History**), con la hora de inicio de la prueba:
+
+```bash
+aws cloudwatch describe-alarm-history --alarm-name "$ALARM_NAME" \
+  --start-date "$(date -u -d '-1 hour' +%Y-%m-%dT%H:%M:%SZ)" \
+  --query 'AlarmHistoryItems[].{Hora: Timestamp, Tipo: HistoryItemType, Resumen: HistorySummary}' \
+  --output table
+```
+
+Resultado esperado del historial, del más reciente al más antiguo. El texto exacto de la entrada `Action` lo pone CloudWatch y se copia tal cual al `detalle`:
+
+| `Tipo` | `Resumen` | Qué indica |
+| --- | --- | --- |
+| `StateUpdate` | `Alarm updated from ALARM to OK` | Vuelta a `OK`, sola en la siguiente evaluación (normalmente en 1 o 2 min) o forzada por el bloque |
+| `Action` | `Successfully executed action arn:aws:automate:us-east-2:ec2:recover` (o un texto de fallo) | CloudWatch invocó la recuperación; debe estar a 60 s o menos del paso a `ALARM` (R22.2) |
+| `StateUpdate` | `Alarm updated from OK to ALARM` | El cambio que provocó `set-alarm-state` |
+
+Que la acción se haya ejecutado no significa que EC2 haya movido la Instancia. Con la Instancia sana, lo más probable es que el `boot_id` no cambie y que R22.4 quede en `no_verificable`. Si EC2 sí la recupera, el `boot_id` cambia y R22.4 se evalúa con los valores de antes y después. Una recuperación real también se puede confirmar en el **AWS Health Dashboard**, con el evento `AWS_EC2_INSTANCE_AUTO_RECOVERY_SUCCESS` o `AWS_EC2_INSTANCE_AUTO_RECOVERY_FAILURE`. Después de un reinicio se repiten 3.4.3 (Systems Manager) y la verificación de la aplicación de 6.3.
+
+Cómo se interpreta:
+
+| Resultado | `estado` | `detalle` | Requisito |
+| --- | --- | --- | --- |
+| Entrada `Action` con el ARN de recuperación y ejecución correcta, a 60 s o menos del paso a `ALARM` | `aprobado` (R22.2) | Horas, segundos transcurridos, texto de la entrada y vuelta a `OK` | R22.2 |
+| Entrada `Action` correcta, pero a más de 60 s | `no_aprobado` (R22.2) | Segundos transcurridos | R22.2 |
+| Sin entrada `Action` tras el paso a `ALARM` | `no_aprobado` (R22.2) | Hora del paso a `ALARM`; se revisa 8.1.2 | R22.2 |
+| Entrada `Action` con un texto de fallo (p. ej. porque EC2 rechaza recuperar una Instancia sana) o con un texto no reconocido | `no_verificable` (R22.2) | El texto de la entrada, tal cual | R22.2 |
+| Hubo reinicio (`boot_id` cambió) y se conservan ID, IP privada, Elastic IP asociada, IP pública, volúmenes y montaje de `/srv/sandbox` | `aprobado` (R22.4) | Los valores observados | R22.4 |
+| Cambió alguno de esos valores, la Instancia no está `running` o `/srv/sandbox` no está montado | `no_aprobado` (R22.4) | Cada valor que cambió | R22.4 |
+| No hubo reinicio (`boot_id` igual) y nada cambió | `no_verificable` (R22.4) | Los valores observados; R22.4 no se puede demostrar sin una recuperación real | R22.4 |
+| Alarma fuera de `OK` antes de la prueba, faltan variables o falla la CLI o Run Command | `no_verificable` (ambas) | La causa | — |
+
+Ejemplos de líneas:
+
+```json
+{"criterio":"CA-25","requisito":"R22.2","estado":"aprobado","detalle":"ALARM a las 2026-11-28T15:02:11.412+00:00; acción ejecutada 1 s después: Successfully executed action arn:aws:automate:us-east-2:ec2:recover; vuelta a OK sola en 70 s (2026-11-28T15:03:20.115+00:00)"}
+{"criterio":"CA-25","requisito":"R22.4","estado":"no_verificable","detalle":"EC2 no ejecutó una recuperación real (boot_id sin cambio): InstanceId, IP privada 172.31.5.20, Elastic IP 3.140.10.20 y volúmenes vol-0aaa...,vol-0bbb... sin cambios; /srv/sandbox desde /dev/nvme1n1; R22.4 solo se demuestra con una recuperación"}
+{"criterio":"CA-25","requisito":"R22.2","estado":"no_verificable","detalle":"CloudWatch intentó la acción 1 s después del paso a ALARM, pero falló: Failed to execute action arn:aws:automate:us-east-2:ec2:recover. ..."}
+```
+
+Un `no_verificable` de 8.1.3 no se resuelve repitiendo la prueba el mismo día (límite diario de recuperaciones). R22.4 se apoya entonces en la configuración aprobada en 8.1.2 y en la documentación de AWS, que dice que la Instancia recuperada conserva su ID, sus IP privadas, sus Elastic IP y sus metadatos ([CloudWatch: acción de recuperación](https://docs.aws.amazon.com/AmazonCloudWatch/latest/monitoring/UsingAlarmActions.html#AddingRecoverActions)). Las líneas se guardan tal como salieron, sin cambiar su `estado`.
+
+#### 8.1.4 Corrección y resumen
+
+Corrección ante `no_aprobado` en 8.1.2 o en la línea R22.2 de 8.1.3: la alarma pertenece al stack, así que no se edita en la consola de CloudWatch ni con `put-metric-alarm`, porque eso generaría *drift* (2.3). Según la causa:
+
+- Alarma inexistente o con otro nombre: se revisa en los eventos del stack (comando de 2.1.6) si `RecoverAlarm` falló o se borró, y se actualiza el stack (2.3) para que CloudFormation la vuelva a crear.
+- Métrica, dimensión, estadística, periodo, umbral, operador, periodos, `TreatMissingData` o acciones distintos: se corrige el recurso `RecoverAlarm` en `infra/cloudformation/pgguardian.yaml` y se actualiza el stack (2.3).
+- `ActionsEnabled=false` (alguien ejecutó `disable-alarm-actions`): se restablece con una actualización del stack (2.3). No se usa `enable-alarm-actions` a mano.
+- Tipo de instancia sin `AutoRecoverySupported`: el cambio de tipo se decide con el Equipo, se registra en `docs/aws/decision-log.md` y se aplica por change set.
+- Dimensión `InstanceId` distinta del output (la Instancia se reemplazó fuera del stack): no se corrige la alarma a mano; se revisa la sección 2 antes de seguir.
+
+Después se repite 8.1.2 completa, conservando las líneas anteriores en la evidencia. 8.1.3 no se repite tras una corrección de 8.1.2, salvo que el Equipo lo decida y acepte otra posible caída.
+
+| Criterio | Bloques que deben estar en `aprobado` | Partes en otras secciones |
+| --- | --- | --- |
+| CA-25 (R22) | 8.1.2 (R22.1, R22.2 en su configuración, R22.3) | 2.1.6 (creación del stack), 3.2 (`InstanceId`); 8.1.3 (R22.2 y R22.4) como prueba complementaria, una sola vez |
+
+CA-25 queda aprobado solo si 8.1.2 está en `aprobado`. Un `no_aprobado` o `no_verificable` de 8.1.2 nunca se da por aprobado: se corrige la causa y se repite el bloque. Las líneas de 8.1.3 se adjuntan a la evidencia de CA-25 con el `estado` que hayan dado.
+### 8.2 Snapshots manuales de estabilización (T-22 · RF-07.4 · CA-26 · R23.1, R23.3, R23.4)
+
+Los respaldos son Snapshot_Manual de EBS tomados a mano con `scripts/aws/manual_snapshot.sh`; no hay política de Data Lifecycle Manager ni prueba de restauración (desviación registrada en el Registro_Decisiones, R24.4). El disco raíz contiene los datos de `app_db` (volumen nombrado `pgguardian_app_data`) y el Volumen_Sandbox los de `sandbox_db` (`/srv/sandbox/pgdata`). Los snapshots no son recursos del stack y se conservan si se borra (R29.9).
+
+Condiciones:
+
+| Condición | Requisito | Verificación |
+| --- | --- | --- |
+| Antes de los snapshots, App_DB (`pgguardian_appdb_prod` en `healthy`) y la aplicación (`/api/health-check` devuelve `{"status":"ok"}`) pasan sus verificaciones de salud durante al menos 5 min (300 s) seguidos | R23.1 | 8.2.2 |
+| Al alcanzar ese estado estable se toma un Snapshot_Manual del disco raíz y uno del Volumen_Sandbox, con las etiquetas `Project=PgGuardian`, `Env=prod` y `Owner` | R23.1 | 8.2.3 y 8.2.4 |
+| Cada snapshot se verifica solo por su estado `completed` con `aws ec2 describe-snapshots`, sin restaurarlo | R23.3 | 8.2.4 |
+| Si un snapshot termina en `error`, se repite el del mismo volumen hasta obtener uno en `completed` | R23.4 | 8.2.3 (`snapshot_disco`) y 8.2.4 |
+
+`manual_snapshot.sh` se ejecuta en CloudShell (`us-east-2`, Usuario_IAM con MFA), desde la raíz del repositorio, con la forma `bash scripts/aws/manual_snapshot.sh <raiz|sandbox|vol-...> [--motivo <motivo>]`. Con `raiz` obtiene el disco raíz con `describe-instances` a partir del output `InstanceId`; con `sandbox` usa el output `SandboxVolumeId`. También acepta el ID de uno de esos dos volúmenes, como en 2.5.4. Rechaza cualquier otro volumen sin crear nada. Crea el snapshot con las etiquetas `Project`, `Env` y `Owner` (el `Owner` del propio volumen) y la descripción `PgGuardian: snapshot manual (<motivo>) del disco <raiz|sandbox> <volumen> <fecha>`, espera con `aws ec2 wait snapshot-completed` (repite la espera de 10 min hasta 6 veces mientras siga en `pending`) y comprueba el resultado con `describe-snapshots`. Escribe un mensaje por paso y termina con una línea `RESULTADO: <inicio> <disco> <volumen> <snapshot> <estado> <motivo>`. Códigos de salida:
+
+| Código | Significado | Qué se hace |
+| --- | --- | --- |
+| 0 | Snapshot en `completed`, del volumen pedido y con las tres etiquetas | Nada |
+| 1 | Falló una precondición o la CLI. El mensaje `ERROR:` dice si el snapshot llegó a crearse | Se corrige la causa (8.2.5) |
+| 2 | Uso incorrecto | Se corrige el comando |
+| 3 | El snapshot terminó en `error` | Se repite el del mismo volumen (R23.4); `snapshot_disco` lo hace solo |
+| 4 | Sigue en `pending` tras 60 min | No se crea otro: se espera con `aws ec2 wait snapshot-completed --snapshot-ids <id>` y se pasa a 8.2.4 |
+
+El procedimiento depende solo de la variable `MOTIVO`, que queda en la descripción de cada snapshot y permite separar las tandas: aquí `MOTIVO=estabilizacion` (T-22); 8.3 (T-27) repite 8.2.1 a 8.2.4 con `MOTIVO=video` 24 h o menos antes de grabar el video. La línea `aprobado` de 8.2.4 incluye el total de snapshots `completed` de ambas tandas por disco, que tras 8.3 debe ser 2 por disco (4 en total).
+
+Los snapshots se toman con la aplicación en marcha, porque el estado estable de R23.1 es justamente ese. Cada base de datos está entera en un solo volumen, así que cada snapshot es consistente ante caídas: al restaurarlo, PostgreSQL se recupera con su WAL como tras un corte de luz. Costo: 0.05 USD por GB-mes de datos ocupados (precio estándar de `us-east-2`); los dos discos suman 28 GiB, así que una tanda cuesta como máximo unos 1.4 USD al mes, y las siguientes del mismo disco solo guardan los bloques que cambiaron.
+
+Orden: 8.2.1 → 8.2.2 → 8.2.3 (justo después de 8.2.2 en `aprobado`) → 8.2.4. No se ejecuta 8.1.3 ni otra prueba que modifique la Instancia mientras dura 8.2.
+
+#### 8.2.1 Preparación en CloudShell
+
+Primero el bloque de 3.2, que define `INSTANCE_ID`, `ROOT_VOLUME_ID`, `SANDBOX_VOLUME_ID` y la función `ssm_run`; después este:
+
+```bash
+mkdir -p docs/aws/evidencia/snapshots
+[ -f scripts/aws/manual_snapshot.sh ] || git pull --ff-only   # copia del repositorio anterior a la tarea 7.4
+bash -n scripts/aws/manual_snapshot.sh && echo "manual_snapshot.sh: sintaxis correcta"
+DOMINIO=$(aws cloudformation describe-stacks --stack-name pgguardian \
+  --query "Stacks[0].Outputs[?OutputKey=='AppDomain'].OutputValue" --output text)
+# Si se usó el respaldo de 5.2.2: DOMINIO=<nombre>.duckdns.org
+MOTIVO=estabilizacion   # 8.3.1 lo cambia a MOTIVO=video
+SELLO=$(date -u +%Y%m%dT%H%MZ)
+LOG="docs/aws/evidencia/snapshots/manual-snapshot-$MOTIVO-$SELLO.log"
+# Toma el snapshot de un disco (raiz o sandbox) y lo repite si termina en error (R23.4).
+snapshot_disco() {
+  local intento rc
+  for intento in 1 2 3; do
+    bash scripts/aws/manual_snapshot.sh "$1" --motivo "$MOTIVO" 2>&1 | tee -a "$LOG"
+    rc=${PIPESTATUS[0]}
+    [ "$rc" -eq 3 ] || return "$rc"
+    echo "snapshot del disco $1 en error (intento $intento de 3); se repite" | tee -a "$LOG"
+  done
+  return 3
+}
+echo "instancia=$INSTANCE_ID raiz=$ROOT_VOLUME_ID sandbox=$SANDBOX_VOLUME_ID dominio=$DOMINIO motivo=$MOTIVO log=$LOG"
+```
+
+Resultado esperado: `manual_snapshot.sh: sintaxis correcta` y la línea `echo` con un `i-...`, dos `vol-...`, el dominio, `estabilizacion` y la ruta del log; ningún valor vacío ni `None`. Si la sesión de CloudShell se reinicia, se repiten 3.2 y este bloque.
+
+#### 8.2.2 Estado estable (R23.1)
+
+El bloque consulta cada 30 s, sin tocar nada, la verificación de salud de App_DB (`docker inspect` del estado `Health` de `pgguardian_appdb_prod`, que corre `pg_isready`, por Run Command con `ssm_run`) y la de la aplicación (`https://$DOMINIO/api/health-check`, que también comprueba la conexión con `app_db`). Una muestra fallida reinicia la cuenta. Da `aprobado` en cuanto las muestras salen bien durante 300 s seguidos, y `no_aprobado` si en 15 min no lo consigue. Tarda al menos 5 min:
+
+```bash
+(
+  criterio="CA-26"; requisito="R23.1 (estado estable, MOTIVO=${MOTIVO:-?})"
+  VENTANA=300; LIMITE=900; PAUSA=30
+  ahora() { date -u +%Y-%m-%dT%H:%M:%SZ; }
+  if [ -z "${INSTANCE_ID:-}" ] || [ -z "${DOMINIO:-}" ] || [ "$DOMINIO" = "None" ] \
+     || [ -z "${MOTIVO:-}" ] || ! declare -F ssm_run >/dev/null; then
+    estado="no_verificable"; detalle="faltan INSTANCE_ID, DOMINIO, MOTIVO o ssm_run; ejecutar 3.2 y 8.2.1"
+  elif ! est=$(aws ec2 describe-instances --instance-ids "$INSTANCE_ID" \
+       --query 'Reservations[0].Instances[0].State.Name' --output text 2>&1); then
+    estado="no_verificable"; detalle="falló aws ec2 describe-instances: $(echo "$est" | tr '\n' ' ')"
+  elif [ "$est" != "running" ]; then
+    estado="no_verificable"; detalle="la instancia $INSTANCE_ID está en '$est'; encenderla con 6.3 antes"
+  else
+    SECONDS=0; t=0; desde=""; desde_utc=""; hasta_utc=""; muestras=0; fallidas=0; ultimo_fallo=""
+    while [ "$SECONDS" -lt "$LIMITE" ]; do
+      t=$SECONDS; t_utc=$(ahora); muestras=$((muestras + 1))
+      db=$(ssm_run "docker inspect -f '{{.State.Health.Status}}' pgguardian_appdb_prod" 2>/dev/null | tr -d '[:space:]')
+      salud=$(curl -s -m 10 "https://$DOMINIO/api/health-check" 2>/dev/null)
+      if [ "$db" = "healthy" ] && [ "$(jq -c . <<< "$salud" 2>/dev/null)" = '{"status":"ok"}' ]; then
+        [ -n "$desde" ] || { desde=$t; desde_utc=$t_utc; }
+        hasta_utc=$t_utc
+        [ $((t - desde)) -ge "$VENTANA" ] && break
+      else
+        desde=""; fallidas=$((fallidas + 1))
+        ultimo_fallo="$t_utc: app_db=${db:-sin respuesta}, health-check='$(echo "${salud:-sin respuesta}" | tr '\n' ' ' | cut -c1-60)'"
+      fi
+      sleep "$PAUSA"
+    done
+    if [ -n "$desde" ] && [ $((t - desde)) -ge "$VENTANA" ]; then
+      estado="aprobado"
+      detalle="app_db healthy y https://$DOMINIO/api/health-check {\"status\":\"ok\"} en todas las muestras de $desde_utc a $hasta_utc ($((t - desde)) s seguidos, una cada $PAUSA s); $fallidas muestras fallidas antes de la racha"
+    else
+      estado="no_aprobado"
+      detalle="no conforme: sin $VENTANA s seguidos de salud en $LIMITE s ($muestras muestras, $fallidas fallidas); último fallo ${ultimo_fallo:-ninguno}"
+    fi
+  fi
+  jq -cn --arg c "$criterio" --arg r "$requisito" --arg e "$estado" --arg d "$detalle" \
+    '{criterio: $c, requisito: $r, estado: $e, detalle: $d}'
+) | tee -a docs/aws/evidencia/snapshots/verificacion-snapshots.jsonl
+```
+
+Cómo se interpreta:
+
+| Resultado | `estado` | `detalle` | Qué se hace |
+| --- | --- | --- | --- |
+| 300 s seguidos con `app_db` en `healthy` y el health-check en `{"status":"ok"}` | `aprobado` | Hora de inicio y de fin de la racha | Se pasa a 8.2.3 sin demora |
+| Alguna muestra falla y en 15 min no se juntan 300 s seguidos | `no_aprobado` | Muestras, fallos y el último fallo | No se toman snapshots; se corrige (8.2.5) y se repite 8.2.2 |
+| La Instancia no está `running`, faltan variables o falla la CLI | `no_verificable` | La causa | Se resuelve y se repite 8.2.2 |
+
+Ejemplos de líneas:
+
+```json
+{"criterio":"CA-26","requisito":"R23.1 (estado estable, MOTIVO=estabilizacion)","estado":"aprobado","detalle":"app_db healthy y https://3-140-10-20.sslip.io/api/health-check {\"status\":\"ok\"} en todas las muestras de 2026-11-28T14:00:05Z a 2026-11-28T14:05:12Z (307 s seguidos, una cada 30 s); 0 muestras fallidas antes de la racha"}
+{"criterio":"CA-26","requisito":"R23.1 (estado estable, MOTIVO=estabilizacion)","estado":"no_aprobado","detalle":"no conforme: sin 300 s seguidos de salud en 900 s (24 muestras, 3 fallidas); último fallo 2026-11-28T14:11:40Z: app_db=healthy, health-check='sin respuesta'"}
+```
+
+#### 8.2.3 Toma de los snapshots (R23.1, R23.4, modifica: crea snapshots)
+
+Solo con 8.2.2 en `aprobado`, en la misma sesión y justo después:
+
+```bash
+snapshot_disco raiz;    echo "código raiz=$?"
+snapshot_disco sandbox; echo "código sandbox=$?"
+grep '^RESULTADO:' "$LOG" | tee -a "docs/aws/evidencia/snapshots/snapshots-$MOTIVO-$SELLO.txt"
+```
+
+Resultado esperado: para cada disco, los siete pasos del script, `manual_snapshot.sh terminó sin errores.` y `código ...=0`; al final, dos líneas como estas (una más por cada intento en `error`):
+
+```text
+RESULTADO: 2026-11-28T14:05:40.512000+00:00 raiz vol-0b1efc51a5925d766 snap-0aaa... completed estabilizacion
+RESULTADO: 2026-11-28T14:12:03.118000+00:00 sandbox vol-0ce09703b3674e7ac snap-0bbb... completed estabilizacion
+```
+
+El primer snapshot de cada disco copia todos los bloques ocupados y puede tardar de unos minutos a más de 10 min; los siguientes son incrementales. El log completo queda en `docs/aws/evidencia/snapshots/manual-snapshot-<motivo>-<sello>.log`.
+
+| Código de `snapshot_disco` | Qué indica | Qué se hace |
+| --- | --- | --- |
+| `0` | Snapshot `completed` con sus etiquetas | Se sigue con el otro disco y con 8.2.4 |
+| `3` | Tres intentos seguidos en `error` | Se revisa la causa (8.2.5) y se vuelve a ejecutar `snapshot_disco <disco>` solo para ese disco, hasta obtener `completed` (R23.4) |
+| `4` | Un snapshot sigue en `pending` tras 60 min | Se espera con `aws ec2 wait snapshot-completed --snapshot-ids <id>` (sin crear otro) y se pasa a 8.2.4 |
+| `1` o `2` | Precondición, CLI o uso | Se lee la línea `ERROR:` y se corrige (8.2.5) |
+
+Si pasan más de unos minutos entre 8.2.2 y 8.2.3 (p. ej. por un reinicio de CloudShell), se repite 8.2.2 antes de tomar los snapshots.
+
+#### 8.2.4 Verificación con `aws ec2 describe-snapshots` (R23.3, sin restaurar)
+
+Solo lee el estado de los snapshots; no se crea ningún volumen a partir de ellos (R23.3). Consulta directa, para guardar la salida en la evidencia:
+
+```bash
+aws ec2 describe-snapshots --owner-ids self \
+  --filters "Name=volume-id,Values=$ROOT_VOLUME_ID,$SANDBOX_VOLUME_ID" Name=tag:Project,Values=PgGuardian \
+  --query 'sort_by(Snapshots, &StartTime)[].[StartTime, VolumeId, SnapshotId, State, Progress, Description]' \
+  --output table | tee "docs/aws/evidencia/snapshots/describe-snapshots-$MOTIVO-$SELLO.txt"
+```
+
+Resultado esperado: una fila por snapshot de los dos discos con `Project=PgGuardian` (también los de otras tandas, como los de 4.9 o 2.5.4 si existen). Las de esta tanda llevan `(estabilizacion)` en la descripción, `completed` y `100%`.
+
+Evaluación automática del criterio. Para cada disco toma los snapshots con `MOTIVO` en la descripción y exige que el más reciente esté en `completed` con las tres etiquetas:
+
+```bash
+(
+  criterio="CA-26"; requisito="R23.1, R23.3, R23.4 (MOTIVO=${MOTIVO:-?})"
+  prefijo="PgGuardian: snapshot manual"
+  if [ -z "${ROOT_VOLUME_ID:-}" ] || [ -z "${SANDBOX_VOLUME_ID:-}" ] || [ -z "${MOTIVO:-}" ]; then
+    estado="no_verificable"; detalle="faltan ROOT_VOLUME_ID, SANDBOX_VOLUME_ID o MOTIVO; ejecutar 3.2 y 8.2.1"
+  elif ! snaps=$(aws ec2 describe-snapshots --owner-ids self \
+       --filters "Name=volume-id,Values=$ROOT_VOLUME_ID,$SANDBOX_VOLUME_ID" Name=tag:Project,Values=PgGuardian \
+       --output json 2>&1); then
+    estado="no_verificable"; detalle="falló aws ec2 describe-snapshots: $(echo "$snaps" | tr '\n' ' ')"
+  else
+    # Snapshots de un volumen con este MOTIVO: cuántos completed y en error, y el más reciente.
+    disco() { jq -c --arg v "$1" --arg d "$prefijo ($MOTIVO) " '
+      [.Snapshots[] | select(.VolumeId == $v and ((.Description // "") | startswith($d)))] | sort_by(.StartTime)
+      | (last // {}) as $u | (($u.Tags // []) | map({(.Key): .Value}) | add // {}) as $t
+      | (($t.Owner // "") | length) as $lo
+      | {completed: (map(select(.State == "completed")) | length),
+         error: (map(select(.State == "error")) | length),
+         id: ($u.SnapshotId // ""), estado: ($u.State // "ninguno"), inicio: ($u.StartTime // ""),
+         etiquetas: ([(if $t.Project != "PgGuardian" then "Project=\($t.Project // "ausente")" else empty end),
+                      (if $t.Env != "prod" then "Env=\($t.Env // "ausente")" else empty end),
+                      (if $lo < 1 or $lo > 256 then "Owner con longitud \($lo)" else empty end)] | join(", "))}' <<< "$snaps"; }
+    # Snapshots completed de las tandas de R23 (estabilizacion y video) de un volumen; tras 7.5, 2 por disco.
+    r23() { jq --arg v "$1" --arg p "$prefijo" '[.Snapshots[] | select(.VolumeId == $v and .State == "completed"
+      and ((.Description // "") | startswith("\($p) (estabilizacion) ") or startswith("\($p) (video) ")))] | length' <<< "$snaps"; }
+    raiz=$(disco "$ROOT_VOLUME_ID"); sb=$(disco "$SANDBOX_VOLUME_ID")
+    fallos=(); pendientes=()
+    for nom in raiz sandbox; do
+      if [ "$nom" = raiz ]; then j=$raiz; vol=$ROOT_VOLUME_ID; else j=$sb; vol=$SANDBOX_VOLUME_ID; fi
+      est=$(jq -r .estado <<< "$j"); id=$(jq -r .id <<< "$j"); etq=$(jq -r .etiquetas <<< "$j")
+      case "$est" in
+        completed) [ -z "$etq" ] || fallos+=("$nom $vol: $id completed con etiquetas no conformes: $etq") ;;
+        pending) pendientes+=("$nom $vol: $id sigue en pending") ;;
+        error) fallos+=("$nom $vol: el último snapshot ($id) terminó en error; repetir snapshot_disco $nom (R23.4)") ;;
+        *) fallos+=("$nom $vol: sin snapshot con MOTIVO=$MOTIVO; ejecutar 8.2.2 y 8.2.3") ;;
+      esac
+    done
+    if [ ${#fallos[@]} -gt 0 ]; then
+      estado="no_aprobado"; detalle="no conforme: $(printf '%s; ' "${fallos[@]}" "${pendientes[@]}" | sed 's/; $//')"
+    elif [ ${#pendientes[@]} -gt 0 ]; then
+      estado="no_verificable"; detalle="$(printf '%s; ' "${pendientes[@]}" | sed 's/; $//'); repetir este bloque cuando terminen"
+    else
+      res() { jq -r '"\(.id) completed (\(.inicio)), \(.error) intentos en error"' <<< "$1"; }
+      estado="aprobado"
+      detalle="MOTIVO=$MOTIVO, sin restaurar: raíz $ROOT_VOLUME_ID $(res "$raiz"); sandbox $SANDBOX_VOLUME_ID $(res "$sb"); snapshots completed de R23 (estabilizacion y video): raíz $(r23 "$ROOT_VOLUME_ID"), sandbox $(r23 "$SANDBOX_VOLUME_ID")"
+    fi
+  fi
+  jq -cn --arg c "$criterio" --arg r "$requisito" --arg e "$estado" --arg d "$detalle" \
+    '{criterio: $c, requisito: $r, estado: $e, detalle: $d}'
+) | tee -a docs/aws/evidencia/snapshots/verificacion-snapshots.jsonl
+```
+
+Cómo se interpreta:
+
+| Salida de la consulta | `estado` | `detalle` | Requisito |
+| --- | --- | --- | --- |
+| El último snapshot de cada disco con `MOTIVO` está en `completed` con `Project=PgGuardian`, `Env=prod` y `Owner` de 1 a 256 caracteres | `aprobado` | ID, hora de inicio e intentos en `error` de cada disco, y el total de snapshots de R23 por disco | R23.1, R23.3, R23.4 |
+| El último snapshot de un disco está en `error` | `no_aprobado` | El ID; se repite `snapshot_disco <disco>` y este bloque | R23.4 |
+| Un disco no tiene snapshot con `MOTIVO` | `no_aprobado` | El disco que falta; se ejecutan 8.2.2 y 8.2.3 | R23.1 |
+| Un snapshot `completed` sin alguna etiqueta o con un valor distinto | `no_aprobado` | Las etiquetas que fallaron | R23.1 (R17) |
+| El último snapshot de un disco sigue en `pending` | `no_verificable` | El ID; se repite el bloque cuando termine | R23.3 |
+| Faltan variables o falla la CLI | `no_verificable` | La causa | — |
+
+Los snapshots en `error` anteriores al `completed` no cambian el resultado: R23.4 se cumple con la repetición, y el `detalle` los cuenta como intentos en `error`.
+
+Ejemplos de líneas:
+
+```json
+{"criterio":"CA-26","requisito":"R23.1, R23.3, R23.4 (MOTIVO=estabilizacion)","estado":"aprobado","detalle":"MOTIVO=estabilizacion, sin restaurar: raíz vol-0b1efc51a5925d766 snap-0aaa... completed (2026-11-28T14:05:40.512000+00:00), 0 intentos en error; sandbox vol-0ce09703b3674e7ac snap-0bbb... completed (2026-11-28T14:12:03.118000+00:00), 0 intentos en error; snapshots completed de R23 (estabilizacion y video): raíz 1, sandbox 1"}
+{"criterio":"CA-26","requisito":"R23.1, R23.3, R23.4 (MOTIVO=estabilizacion)","estado":"no_aprobado","detalle":"no conforme: sandbox vol-0ce09703b3674e7ac: el último snapshot (snap-0ccc...) terminó en error; repetir snapshot_disco sandbox (R23.4)"}
+{"criterio":"CA-26","requisito":"R23.1, R23.3, R23.4 (MOTIVO=estabilizacion)","estado":"no_verificable","detalle":"raiz vol-0b1efc51a5925d766: snap-0aaa... sigue en pending; repetir este bloque cuando terminen"}
+```
+
+#### 8.2.5 Corrección y resumen
+
+Corrección según el resultado:
+
+- 8.2.2 en `no_aprobado`: no se toman snapshots. Se diagnostica con la tabla de 6.3 (fila del health-check) y, en Session Manager, con `sudo docker inspect pgguardian_appdb_prod -f '{{json .State.Health}}'` y `sudo docker logs --tail 50 pgguardian_appdb_prod`. Tras corregir, se repite 8.2.2 completa.
+- Código `1` de `manual_snapshot.sh` antes de crear el snapshot (región, stack, volumen u `Owner`): se corrige la causa que indica el `ERROR:`. Un `Owner` inválido en el volumen se corrige con 3.7. Después se repite 8.2.3 para ese disco.
+- Código `1` después de crear el snapshot (etiquetas no conformes en el paso 6): no se toma otro; se corrigen las etiquetas con `aws ec2 create-tags --resources <snap-id> --tags Key=<clave>,Value=<valor>` y se repite 8.2.4.
+- Código `3` tras tres intentos: el snapshot en `error` no guarda datos. Se revisa el `StateMessage` que muestra el script, el estado del volumen (`aws ec2 describe-volumes --volume-ids <vol>`) y el **AWS Health Dashboard**, y se vuelve a ejecutar `snapshot_disco <disco>` para ese volumen hasta obtener `completed` (R23.4). Los snapshots en `error` se pueden dejar; no se borran sin acuerdo del Equipo.
+- `no_verificable` por `pending`: se espera con `aws ec2 wait snapshot-completed --snapshot-ids <id>` y se repite 8.2.4.
+
+Las líneas anteriores se conservan en `verificacion-snapshots.jsonl`.
+
+| Criterio | Bloques que deben estar en `aprobado` | Partes en otras secciones |
+| --- | --- | --- |
+| CA-26 (R23.1, R23.3, R23.4; tanda de estabilización) | 8.2.2 y 8.2.4 con `MOTIVO=estabilizacion` | 3.2 (`InstanceId`, disco raíz, `SandboxVolumeId`), 3.7 (etiquetas de los volúmenes) |
+| CA-26 (R23.2, R23.3, R23.4; tanda previa al video) | 8.2.2 y 8.2.4 con `MOTIVO=video` (8.3.2 y 8.3.3) y 8.3.4, todos antes de empezar a grabar | 8.3.1 (`GRABACION`), Registro_Decisiones (R24.4: snapshots manuales en lugar de DLM, sin prueba de restauración) |
+
+La tanda de estabilización queda aprobada solo si 8.2.2 y 8.2.4 están en `aprobado` con `MOTIVO=estabilizacion`, y 8.2.4 se ejecutó después de 8.2.2. La tanda previa al video queda aprobada solo si 8.2.2 y 8.2.4 están en `aprobado` con `MOTIVO=video` y 8.3.4 está en `aprobado` con la hora real de la grabación en `GRABACION`, es decir, 4 snapshots `completed` (2 por disco). CA-26 queda aprobado solo con las dos tandas aprobadas. Un `no_aprobado` o `no_verificable` nunca se da por aprobado: se corrige la causa y se repite el bloque.
+
+### 8.3 Snapshots manuales previos a la grabación del video (T-27 · RF-07.4 · CA-26 · R23.2, R23.3, R23.4)
+
+La segunda tanda repite el procedimiento de 8.2 con `MOTIVO=video`, 24 h o menos antes de empezar a grabar el video, y añade dos comprobaciones: que cada snapshot de video empezó dentro de esas 24 h y que cada disco tiene exactamente 2 snapshots `completed` de R23 (uno de estabilización y uno de video, 4 en total). Requiere la tanda de estabilización aprobada (8.2.5). Los snapshots en `error` no cuentan, y tampoco los de otros motivos (p. ej. `borrado` de 2.5.4 o los de 4.9).
+
+Condiciones:
+
+| Condición | Requisito | Verificación |
+| --- | --- | --- |
+| Con 24 h o menos para la hora planificada de la grabación (`GRABACION`), y antes de esa hora, se toma un segundo Snapshot_Manual del disco raíz y uno del Volumen_Sandbox: su `StartTime` cae en [`GRABACION` − 24 h, `GRABACION`) y es posterior al de estabilización del mismo disco | R23.2 | 8.3.1, 8.3.2 y 8.3.4 |
+| Cada snapshot de video se verifica solo por su estado `completed`, sin restaurarlo | R23.3 | 8.2.4 con `MOTIVO=video` |
+| Si un snapshot de video termina en `error`, se repite el del mismo volumen hasta obtener uno en `completed` | R23.4 | 8.2.3 (`snapshot_disco`) y 8.2.4 con `MOTIVO=video` |
+| Resultado final: exactamente 2 snapshots `completed` de R23 por disco (4 en total) | R23.2, R23.3 | 8.3.4 |
+
+Cuándo: lo bastante cerca de la grabación para quedar dentro de las 24 h, pero con margen para repetir si algo falla. Se recomienda empezar entre 2 h y 12 h antes: 8.2.2 tarda al menos 5 min y los snapshots de esta tanda son incrementales, así que suelen tardar menos que los de estabilización. Si la grabación se retrasa y la nueva hora queda a más de 24 h de los snapshots de video, hay que tomar otra tanda (ver 8.3.4).
+
+Orden: 3.2 → 8.2.1 → 8.3.1 → 8.3.2 (8.2.2 y 8.2.3) → 8.3.3 (8.2.4) → 8.3.4, todo antes de empezar a grabar. Como en 8.2, no se ejecuta 8.1.3 ni otra prueba que modifique la Instancia mientras dura 8.3.
+
+#### 8.3.1 Preparación en CloudShell
+
+Primero el bloque de 3.2 y después el de 8.2.1 tal cual (define `DOMINIO` y la función `snapshot_disco`; su línea `echo` todavía muestra `estabilizacion`). Luego este bloque, que cambia `MOTIVO`, abre un log nuevo y fija la hora planificada de la grabación. `snapshot_disco` lee `MOTIVO` y `LOG` al ejecutarse, así que toma los valores nuevos:
+
+```bash
+MOTIVO=video
+GRABACION=2026-12-03T16:00:00Z   # hora UTC planificada de inicio de la grabación; cambiarla
+SELLO=$(date -u +%Y%m%dT%H%MZ)
+LOG="docs/aws/evidencia/snapshots/manual-snapshot-$MOTIVO-$SELLO.log"
+if g=$(date -u -d "$GRABACION" +%s 2>/dev/null); then
+  faltan=$(( g - $(date -u +%s) ))
+  if [ "$faltan" -gt 0 ] && [ "$faltan" -le 86400 ]; then
+    ventana="dentro de las 24 h previas: se puede seguir con 8.3.2"
+  else
+    ventana="FUERA de las 24 h previas: no tomar los snapshots todavía"
+  fi
+  echo "grabacion=$GRABACION motivo=$MOTIVO log=$LOG faltan=$(( faltan / 60 )) min ($ventana)" \
+    | tee "docs/aws/evidencia/snapshots/grabacion-video-$SELLO.txt"
+else
+  echo "GRABACION='$GRABACION' no es una fecha válida (formato AAAA-MM-DDTHH:MM:SSZ, en UTC)"
+fi
+```
+
+Resultado esperado: una línea con la hora de la grabación, `motivo=video`, la ruta del log, los minutos que faltan (más de 0 y como máximo 1440) y `dentro de las 24 h previas`. Con `FUERA de las 24 h previas` (falta más de un día o la hora ya pasó) no se sigue: se espera o se corrige `GRABACION` y se repite el bloque. La hora planificada queda en `docs/aws/evidencia/snapshots/grabacion-video-<sello>.txt`. Si la sesión de CloudShell se reinicia, se repiten 3.2, 8.2.1 y este bloque con el mismo `GRABACION`.
+
+#### 8.3.2 Estado estable y toma de los snapshots (R23.2, R23.4, modifica: crea snapshots)
+
+Se ejecutan, en la misma sesión y sin cambiar nada, el bloque de 8.2.2 y, justo después de que dé `aprobado`, el de 8.2.3. R23.2 no exige el estado estable, pero 8.2.2 confirma que la aplicación está sana para la grabación y que los datos del snapshot corresponden a un sistema que funciona.
+
+Resultado esperado:
+
+- 8.2.2: una línea `aprobado` con `"requisito":"R23.1 (estado estable, MOTIVO=video)"`.
+- 8.2.3: `código raiz=0`, `código sandbox=0` y dos líneas `RESULTADO:` que terminan en `completed video` (una más por cada intento en `error`), guardadas en `docs/aws/evidencia/snapshots/snapshots-video-<sello>.txt`:
+
+```text
+RESULTADO: 2026-12-03T09:20:14.301000+00:00 raiz vol-0b1efc51a5925d766 snap-0ddd... completed video
+RESULTADO: 2026-12-03T09:23:51.877000+00:00 sandbox vol-0ce09703b3674e7ac snap-0eee... completed video
+```
+
+Los códigos de `snapshot_disco` se tratan con la tabla de 8.2.3. Un código `3` se resuelve repitiendo `snapshot_disco <disco>` para ese disco (R23.4), siempre antes de la hora de la grabación.
+
+#### 8.3.3 Verificación del estado `completed` (R23.3, R23.4, sin restaurar)
+
+Se ejecutan los dos bloques de 8.2.4 sin cambios. Con `MOTIVO=video`, la tabla se guarda en `docs/aws/evidencia/snapshots/describe-snapshots-video-<sello>.txt` y la evaluación revisa el último snapshot de video de cada disco.
+
+Resultado esperado: en la tabla, las filas de esta tanda llevan `(video)` en la descripción, `completed` y `100%`, y aparecen después de las de `(estabilizacion)`. La línea de la evaluación es `aprobado`, con `"requisito":"R23.1, R23.3, R23.4 (MOTIVO=video)"` y el `detalle` terminado en `snapshots completed de R23 (estabilizacion y video): raíz 2, sandbox 2`. Un `no_aprobado` o `no_verificable` se trata con la tabla de 8.2.4 y con 8.2.5.
+
+#### 8.3.4 Ventana de 24 h y total de snapshots (R23.2, R23.3)
+
+Solo lee los snapshots; no crea ni restaura nada. Usa `GRABACION` de 8.3.1. Para cada disco toma los snapshots de R23 (descripción con `(estabilizacion)` o `(video)`) y exige:
+
+- ninguno en `pending`;
+- al menos un `completed` de estabilización y uno de video;
+- que cada `completed` de video haya empezado en [`GRABACION` − 24 h, `GRABACION`);
+- que el último de video sea posterior al último de estabilización;
+- exactamente 2 `completed` de R23 en el disco.
+
+```bash
+(
+  criterio="CA-26"; requisito="R23.2, R23.3 (MOTIVO=video, 2 por disco)"
+  prefijo="PgGuardian: snapshot manual"
+  if [ -z "${ROOT_VOLUME_ID:-}" ] || [ -z "${SANDBOX_VOLUME_ID:-}" ] || [ -z "${GRABACION:-}" ]; then
+    estado="no_verificable"; detalle="faltan ROOT_VOLUME_ID, SANDBOX_VOLUME_ID o GRABACION; ejecutar 3.2, 8.2.1 y 8.3.1"
+  elif ! g=$(date -u -d "$GRABACION" +%s 2>/dev/null); then
+    estado="no_verificable"; detalle="GRABACION='$GRABACION' no es una fecha válida; repetir 8.3.1"
+  elif ! snaps=$(aws ec2 describe-snapshots --owner-ids self \
+       --filters "Name=volume-id,Values=$ROOT_VOLUME_ID,$SANDBOX_VOLUME_ID" Name=tag:Project,Values=PgGuardian \
+       --output json 2>&1); then
+    estado="no_verificable"; detalle="falló aws ec2 describe-snapshots: $(echo "$snaps" | tr '\n' ' ')"
+  else
+    # Snapshots de R23 de un disco ($1 = raiz|sandbox, $2 = volumen), con StartTime en segundos.
+    disco() { jq -c --arg n "$1" --arg v "$2" --arg p "$prefijo" --argjson g "$g" '
+      [.Snapshots[] | select(.VolumeId == $v) | (.Description // "") as $d
+       | (if ($d | startswith("\($p) (estabilizacion) ")) then "estabilizacion"
+          elif ($d | startswith("\($p) (video) ")) then "video" else empty end) as $m
+       | {id: .SnapshotId, m: $m, estado: .State, inicio: .StartTime,
+          t: (.StartTime | sub("(\\.[0-9]+)?(\\+00:00|Z)$"; "Z") | fromdateiso8601)}]
+      | sort_by(.t) as $s
+      | ($s | map(select(.estado == "completed"))) as $c
+      | ($c | map(select(.m == "estabilizacion"))) as $ce
+      | ($c | map(select(.m == "video"))) as $cv
+      | {n: ($c | length),
+         pendientes: [$s[] | select(.estado == "pending") | "\($n) \($v): \(.id) (\(.m)) sigue en pending"],
+         fallos: [
+           (if ($ce | length) == 0 then "\($n) \($v): sin snapshot completed con MOTIVO=estabilizacion; ejecutar 8.2" else empty end),
+           (if ($cv | length) == 0 then "\($n) \($v): sin snapshot completed con MOTIVO=video; ejecutar 8.3.2" else empty end),
+           ($cv[] | select(.t < $g - 86400 or .t >= $g)
+             | "\($n) \($v): \(.id) (video) empezó el \(.inicio), fuera de las 24 h previas a la grabación"),
+           (if ($ce | length) > 0 and ($cv | length) > 0 and $cv[-1].t <= $ce[-1].t
+             then "\($n) \($v): el último snapshot de video no es posterior al de estabilización" else empty end),
+           (if ($c | length) != 2
+             then "\($n) \($v): \($c | length) snapshots completed de R23 (\($ce | length) estabilizacion, \($cv | length) video); se esperan 2"
+             else empty end)],
+         resumen: "\($n) \($v): \($c | map("\(.id) \(.m) \(.inicio)") | join(", ")); video \((($g - ($cv[-1].t // $g)) / 360 | floor) / 10) h antes de la grabación"}' <<< "$snaps"; }
+    if ! raiz=$(disco raiz "$ROOT_VOLUME_ID") || ! sb=$(disco sandbox "$SANDBOX_VOLUME_ID"); then
+      estado="no_verificable"; detalle="jq no pudo procesar la salida de describe-snapshots"
+    else
+      pend=$(printf '%s\n%s\n' "$raiz" "$sb" | jq -rs '[.[].pendientes[]] | join("; ")')
+      fall=$(printf '%s\n%s\n' "$raiz" "$sb" | jq -rs '[.[].fallos[]] | join("; ")')
+      if [ -n "$pend" ]; then
+        estado="no_verificable"; detalle="$pend; repetir este bloque cuando terminen"
+      elif [ -n "$fall" ]; then
+        estado="no_aprobado"; detalle="no conforme: $fall"
+      else
+        estado="aprobado"
+        detalle="grabación planificada $GRABACION, verificado $(date -u +%Y-%m-%dT%H:%M:%SZ), sin restaurar: $(jq -r .resumen <<< "$raiz"); $(jq -r .resumen <<< "$sb"); total $(( $(jq .n <<< "$raiz") + $(jq .n <<< "$sb") )) snapshots completed (2 por disco)"
+      fi
+    fi
+  fi
+  jq -cn --arg c "$criterio" --arg r "$requisito" --arg e "$estado" --arg d "$detalle" \
+    '{criterio: $c, requisito: $r, estado: $e, detalle: $d}'
+) | tee -a docs/aws/evidencia/snapshots/verificacion-snapshots.jsonl
+```
+
+Cómo se interpreta:
+
+| Salida de la consulta | `estado` | `detalle` | Qué se hace |
+| --- | --- | --- | --- |
+| Cada disco tiene 1 `completed` de estabilización y 1 de video, el de video empezó en las 24 h previas a `GRABACION` y después del de estabilización | `aprobado` | Hora de la grabación y de la verificación, los IDs con su `StartTime`, las horas de antelación y el total (4) | Se puede grabar |
+| Un snapshot de R23 sigue en `pending` | `no_verificable` | El ID | Se espera con `aws ec2 wait snapshot-completed --snapshot-ids <id>` y se repite el bloque |
+| Falta el `completed` de video (o el de estabilización) de un disco | `no_aprobado` | El disco y la tanda | Se ejecuta 8.3.2 (u 8.2) para ese disco |
+| Un snapshot de video empezó más de 24 h antes de `GRABACION`, o a esa hora o después | `no_aprobado` | El ID y su `StartTime` | Ver la corrección de abajo |
+| El último de video no es posterior al de estabilización | `no_aprobado` | El disco | Se revisa qué se tomó en cada tanda (tabla de 8.3.3) |
+| Un disco tiene más o menos de 2 `completed` de R23 | `no_aprobado` | El disco y el conteo por tanda | Ver la corrección de abajo |
+| Faltan variables, `GRABACION` no es una fecha o falla la CLI | `no_verificable` | La causa | Se resuelve y se repite el bloque |
+
+Ejemplos de líneas:
+
+```json
+{"criterio":"CA-26","requisito":"R23.2, R23.3 (MOTIVO=video, 2 por disco)","estado":"aprobado","detalle":"grabación planificada 2026-12-03T16:00:00Z, verificado 2026-12-03T09:31:02Z, sin restaurar: raiz vol-0b1efc51a5925d766: snap-0aaa... estabilizacion 2026-11-28T14:05:40.512000+00:00, snap-0ddd... video 2026-12-03T09:20:14.301000+00:00; video 6.6 h antes de la grabación; sandbox vol-0ce09703b3674e7ac: snap-0bbb... estabilizacion 2026-11-28T14:12:03.118000+00:00, snap-0eee... video 2026-12-03T09:23:51.877000+00:00; video 6.6 h antes de la grabación; total 4 snapshots completed (2 por disco)"}
+{"criterio":"CA-26","requisito":"R23.2, R23.3 (MOTIVO=video, 2 por disco)","estado":"no_aprobado","detalle":"no conforme: raiz vol-0b1efc51a5925d766: snap-0ddd... (video) empezó el 2026-12-03T09:20:14.301000+00:00, fuera de las 24 h previas a la grabación; sandbox vol-0ce09703b3674e7ac: snap-0eee... (video) empezó el 2026-12-03T09:23:51.877000+00:00, fuera de las 24 h previas a la grabación"}
+{"criterio":"CA-26","requisito":"R23.2, R23.3 (MOTIVO=video, 2 por disco)","estado":"no_verificable","detalle":"sandbox vol-0ce09703b3674e7ac: snap-0eee... (video) sigue en pending; repetir este bloque cuando terminen"}
+```
+
+Corrección:
+
+- La grabación se retrasa: se repite 8.3.1 con la hora real en `GRABACION` y después 8.3.4. Si los snapshots de video siguen dentro de las 24 h previas, basta con eso. Si quedan fuera, se toma otra tanda (8.3.2 y 8.3.3) dentro de la nueva ventana. Entonces el disco tiene 3 `completed` de R23 y 8.3.4 da `no_aprobado` por el conteo.
+- Sobran snapshots `completed` de R23 (otra tanda de video por un retraso, o 8.2.3 ejecutado dos veces): se conservan el último de estabilización y el último de video de cada disco. Los demás, solo con acuerdo del Equipo, se borran con `aws ec2 delete-snapshot --snapshot-id <id>`. El borrado no se puede deshacer, así que antes se comprueba el ID contra la tabla de 8.3.3. Después se repite 8.3.4.
+- Los snapshots en `error` no cuentan ni hace falta borrarlos.
+
+Si la grabación ya empezó y 8.3.4 no está en `aprobado`, R23.2 no se cumplió para esa grabación. Se corrige la causa, se toman los snapshots dentro de las 24 h previas a una nueva grabación y se graba de nuevo. Las líneas anteriores se conservan en `verificacion-snapshots.jsonl`; el resumen de CA-26 con las dos tandas está en 8.2.5.

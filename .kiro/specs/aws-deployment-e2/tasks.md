@@ -194,33 +194,33 @@ Lenguajes: Python (FastAPI, unittest), JavaScript (React/Vite), YAML (Compose y 
     - Nota de costo: detenida, la Instancia no cobra cómputo, pero se siguen cobrando los discos (20 + 8 GB gp3) y la Elastic IP, unos 5.9 USD al mes.
     - _Sustitución de RF-03.6 (R24.3), RF-06.8 · CA-23 · Requirements: 19.1, 19.8, 24.3_
 
-- [ ] 7. Fase 5: costos y resiliencia (T-19 a T-22, T-27 y secreto huérfano)
-  - [ ] 7.1 T-19: Verificación del presupuesto mensual de 30 USD
+- [x] 7. Fase 5: costos y resiliencia (T-19 a T-22, T-27 y secreto huérfano)
+  - [x] 7.1 T-19: Verificación del presupuesto mensual de 30 USD
     - El presupuesto lo crea la plantilla (tarea 5.1); esta tarea solo añade verificaciones.
     - Añadir a la sección costos de `docs/aws/runbook.md` los comandos `describe-budget` (incluido `CostTypes`) y `describe-notifications-for-budget` (exactamente 4 notificaciones), con la instrucción de anotar notificaciones faltantes o sobrantes.
     - _RF-07.1 · CA-24 · Requirements: 20.1, 20.2, 20.3, 20.4, 20.5, 20.6, 20.7_
 
-  - [ ] 7.2 T-20: Verificación de Cost Anomaly Detection
+  - [x] 7.2 T-20: Verificación de Cost Anomaly Detection
     - El monitor y la suscripción los crea la plantilla (tarea 5.1); esta tarea añade sus verificaciones.
     - Solo si se activa el plan B de la tarea 5.2: crear `scripts/aws/create_anomaly_detection.sh` con el mismo monitor `DIMENSIONAL` de servicio y la suscripción `DAILY` por correo con la misma `ThresholdExpression` que la plantilla, y anotar en la sección costos que esos dos recursos quedan fuera del stack. Antes de crear el monitor, el script hace la misma comprobación previa de la tarea 5.2: busca un monitor `DIMENSIONAL` con `get-anomaly-monitors`, guarda como evidencia la salida de ese comando y la de `get-anomaly-subscriptions`, borra las suscripciones y después el monitor.
     - Añadir a la sección costos de `docs/aws/runbook.md` la verificación con `get-anomaly-monitors` y `get-anomaly-subscriptions`.
     - _RF-07.2 · CA-24 · Requirements: 21.1, 21.2, 21.3, 21.4, 29.10_
 
-  - [ ] 7.3 T-21: Verificación de la alarma de recuperación automática
+  - [x] 7.3 T-21: Verificación de la alarma de recuperación automática
     - La alarma la crea la plantilla (tarea 5.1); esta tarea solo añade verificaciones.
     - Añadir a la sección snapshots de `docs/aws/runbook.md` la verificación con `describe-alarms` y la prueba con `set-alarm-state`.
     - _RF-07.3 · CA-25 · Requirements: 22.1, 22.2, 22.3, 22.4_
 
-  - [ ] 7.4 T-22: Snapshots manuales de estabilización
+  - [x] 7.4 T-22: Snapshots manuales de estabilización
     - Crear `scripts/aws/manual_snapshot.sh`: recibe el volumen (raíz, obtenido con `describe-instances` a partir del output `InstanceId`, o sandbox, del output `SandboxVolumeId`), crea el snapshot con las etiquetas `Project`, `Env` y `Owner`, espera con `aws ec2 wait snapshot-completed` e informa si termina en `error`.
     - Añadir a la sección snapshots de `docs/aws/runbook.md` el procedimiento: al alcanzar el estado estable (App_DB y la aplicación pasan sus verificaciones de salud durante al menos 5 min seguidos), un snapshot del disco raíz y uno del Volumen_Sandbox; verificar solo el estado `completed` con `describe-snapshots`, sin restaurar; repetir el del mismo volumen si termina en `error`.
     - _RF-07.4 · CA-26 · Requirements: 23.1, 23.3, 23.4_
 
-  - [ ] 7.5 T-27: Snapshots manuales previos a la grabación del video
+  - [x] 7.5 T-27: Snapshots manuales previos a la grabación del video
     - Añadir a la sección snapshots de `docs/aws/runbook.md` el procedimiento con `scripts/aws/manual_snapshot.sh`: 24 h o menos antes de grabar el video, un segundo snapshot del disco raíz y uno del Volumen_Sandbox, verificados por estado `completed` y repetidos si terminan en `error`. Resultado esperado: 4 snapshots `completed` (2 por disco).
     - _RF-07.4 · CA-26 · Requirements: 23.2, 23.3, 23.4_
 
-  - [ ] 7.6 Secreto huérfano de Secrets Manager (sin T-xx; ejecución manual por el Equipo)
+  - [x] 7.6 Secreto huérfano de Secrets Manager (sin T-xx; ejecución manual por el Equipo)
     - Añadir a la sección costos de `docs/aws/runbook.md` el procedimiento manual: `aws secretsmanager list-secrets --region us-east-2` para identificar el Secreto_Huerfano; confirmar que no se usa (fecha de último acceso y búsqueda del nombre o ARN en el código, en `docker-compose.prod.yml` y en el `.env` de la Instancia); solo entonces `aws secretsmanager delete-secret --secret-id <arn> --recovery-window-in-days <7..30>`, nunca con `--force-delete-without-recovery`; y `describe-secret` para ver la fecha de borrado programada.
     - Incluir el caso en que no se puede confirmar el no uso: conservar el secreto y registrar el motivo.
     - _Limpieza de la cuenta · Requirements: 27.1, 27.2, 27.3, 27.4_
