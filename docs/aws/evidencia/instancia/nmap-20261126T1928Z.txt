@@ -1,0 +1,9 @@
+# Nmap 7.93 scan initiated Thu Nov 26 19:29:36 2026 as: nmap -Pn -p- -T4 --min-rate 1000 -oN docs/aws/evidencia/instancia/nmap-20261126T1928Z.txt 3.14.31.64
+Nmap scan report for ec2-3-14-31-64.us-east-2.compute.amazonaws.com (3.14.31.64)
+Host is up (0.0055s latency).
+Not shown: 65533 filtered tcp ports (no-response)
+PORT    STATE SERVICE
+80/tcp  open  http
+443/tcp open  https
+
+# Nmap done at Thu Nov 26 19:31:00 2026 -- 1 IP address (1 host up) scanned in 84.55 seconds
