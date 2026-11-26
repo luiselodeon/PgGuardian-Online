@@ -3250,7 +3250,196 @@ Un criterio nunca se da por aprobado con un bloque en `no_aprobado` o `no_verifi
 
 ## 6. Encender y detener
 
-Pendiente: tarea 6.4 (`stop-instances`/`start-instances` y verificación tras encender).
+Trazabilidad: componente C8 del diseño · sustitución de RF-03.6 (R24.3), RF-06.8 · CA-23 · R19.1, R19.8 y R24.3 · Sin T-xx en la fuente.
+
+El Equipo enciende y detiene la Instancia cuando quiera: no es requisito que esté disponible 24/7 ni que se detenga fuera de las demostraciones (R24.3; la decisión está en `docs/aws/decision-log.md`). Para una pausa se detiene la Instancia; el stack no se borra (el borrado, en 2.5, elimina los discos y la Elastic IP).
+
+Condiciones que se verifican tras cada inicio, contadas desde `start-instances` y sin intervención manual:
+
+| Condición | Requisito | Verificación |
+| --- | --- | --- |
+| La Instancia aparece `Online` en Systems Manager | R19.8 (y R10.3) | 6.3 |
+| `docker ps` muestra los 5 contenedores de `docker-compose.prod.yml` en ejecución | R19.8 | 6.3 |
+| `curl https://<dominio>/api/health-check` devuelve `{"status":"ok"}` por la misma URL HTTPS | R19.8 | 6.3 |
+| Las tres condiciones anteriores se cumplen en ≤ 5 min (300 s) desde el inicio | R19.8 | 6.3 |
+| La IP pública sigue siendo la Elastic IP del output `PublicIp` | R19.1 | 3.8.1 con `MOMENTO=despues` |
+
+Por qué la aplicación vuelve sola:
+
+- El servicio `docker` está habilitado al arranque (tarea 6.1, verificado en 4.7.2) y los cinco servicios de `docker-compose.prod.yml` tienen `restart: unless-stopped`, así que Docker los levanta al arrancar el sistema sin `docker compose up`.
+- `/srv/sandbox` se monta desde `/etc/fstab` por UUID (3.6.3), antes de que Docker levante `sandbox_db`.
+- La Elastic IP sigue asociada a la Instancia y conserva la dirección (R19.1), así que `APP_DOMAIN` y la URL no cambian.
+- Caddy guarda el certificado en el volumen `caddy_data` (`pgguardian_caddy_data`), que está en el disco raíz. Al arrancar no vuelve a pedirlo a Let's Encrypt y el HTTPS funciona igual.
+
+Las líneas «Resultado de verificación» de esta sección se guardan en `docs/aws/evidencia/encendido/verificacion-encendido.jsonl` (p. ej. terminando el bloque con `| tee -a docs/aws/evidencia/encendido/verificacion-encendido.jsonl`), una por cada ciclo de detener y encender que se quiera documentar.
+
+### 6.1 Preparación en CloudShell
+
+Se ejecuta en CloudShell (`us-east-2`, Usuario_IAM con MFA). El `InstanceId` sale de los outputs del stack (2.2):
+
+```bash
+aws cloudformation describe-stacks --stack-name pgguardian --query "Stacks[0].Outputs" --output table
+```
+
+Después se ejecuta el bloque de 3.2, que define `INSTANCE_ID`, `PUBLIC_IP` y la función `ssm_run`, y se define el dominio como en 5.3:
+
+```bash
+mkdir -p docs/aws/evidencia/encendido
+DOMINIO=$(aws cloudformation describe-stacks --stack-name pgguardian \
+  --query "Stacks[0].Outputs[?OutputKey=='AppDomain'].OutputValue" --output text)
+# Si se usó el respaldo de 5.2.2: DOMINIO=<nombre>.duckdns.org
+echo "instancia=$INSTANCE_ID ip=$PUBLIC_IP dominio=$DOMINIO"
+```
+
+Resultado esperado: `i-...`, una IPv4 y `<ip-con-guiones>.sslip.io` (o el subdominio de DuckDNS), ninguno vacío ni `None`.
+
+### 6.2 Detener (modifica: detiene la Instancia)
+
+> **Atención.** La aplicación no responde mientras la Instancia está detenida. Se avisa al Equipo antes. No se usa `--force`: obliga a apagar sin cerrar PostgreSQL de forma ordenada.
+
+Antes de detener, se repite 3.8.1 con `MOMENTO=antes` y se guarda el número de serie del certificado, para comprobar después que Caddy no pidió otro:
+
+```bash
+CERT_ANTES=$(openssl s_client -connect "$DOMINIO:443" -servername "$DOMINIO" </dev/null 2>/dev/null \
+  | openssl x509 -noout -serial)
+echo "$CERT_ANTES"
+aws ec2 stop-instances --instance-ids "$INSTANCE_ID"
+aws ec2 wait instance-stopped --instance-ids "$INSTANCE_ID"
+aws ec2 describe-instances --instance-ids "$INSTANCE_ID" \
+  --query 'Reservations[0].Instances[0].State.Name' --output text
+```
+
+Resultado esperado: `serial=...`, la transición `running` → `stopping` en la salida de `stop-instances` y, tras `wait instance-stopped`, la línea `stopped`. `wait` consulta cada 15 s y se rinde a los 10 min; si se rinde, se revisa el estado en la consola y no se fuerza la detención.
+
+Detenida, la Instancia no cobra cómputo, pero se siguen cobrando los discos y la Elastic IP, unos 5.9 USD al mes:
+
+| Recurso | Cálculo (precios de `us-east-2`) | USD al mes |
+| --- | --- | --- |
+| Disco raíz y Volumen_Sandbox, gp3 | (20 + 8) GB × 0.08 USD por GB-mes | 2.24 |
+| Elastic IP (IPv4 pública, se cobra asociada o no) | 0.005 USD por hora × 730 h | 3.65 |
+| Total |  | 5.89 |
+
+### 6.3 Encender y verificar (R19.8, modifica: inicia la Instancia)
+
+El bloque inicia la Instancia con `start-instances`, espera `instance-running` y, a partir de ahí, consulta cada 10 s, sin tocar nada en la Instancia, las tres condiciones de la tabla de la sección 6. El reloj (`SECONDS`) empieza justo antes de `start-instances`. `docker ps` se lee por Run Command con `ssm_run` (3.2), que corre como `root` en el host. El bloque solo empieza si la Instancia está `stopped` (6.2).
+
+Consulta directa, para guardar la salida en la evidencia:
+
+```bash
+aws ec2 start-instances --instance-ids "$INSTANCE_ID"
+aws ec2 wait instance-running --instance-ids "$INSTANCE_ID"
+aws ssm describe-instance-information --filters "Key=InstanceIds,Values=$INSTANCE_ID" \
+  --query 'InstanceInformationList[0].[InstanceId,PingStatus,LastPingDateTime]' --output text
+ssm_run "docker ps --format '{{.Names}} {{.State}} {{.Status}}'"
+curl -s -m 10 "https://$DOMINIO/api/health-check"; echo
+```
+
+Resultado esperado: `Online`; cinco líneas `pgguardian_proxy`, `pgguardian_frontend_prod`, `pgguardian_api_prod`, `pgguardian_appdb_prod` y `pgguardian_sandboxdb_prod`, todas `running`; y `{"status":"ok"}`. Justo después del inicio, `ssm_run` y `curl` fallan durante uno o dos minutos; por eso la evaluación automática repite las consultas.
+
+Evaluación automática del criterio. Sustituye a la consulta directa (no se ejecutan las dos en el mismo ciclo, porque el bloque solo arranca con la Instancia `stopped`):
+
+```bash
+(
+  criterio="CA-23"; requisito="R19.8, R24.3 (tras encender)"
+  ESPERADOS="pgguardian_proxy pgguardian_frontend_prod pgguardian_api_prod pgguardian_appdb_prod pgguardian_sandboxdb_prod"
+  LIMITE=300
+  if [ -z "$INSTANCE_ID" ] || [ -z "$DOMINIO" ] || ! declare -F ssm_run >/dev/null; then
+    estado="no_verificable"; detalle="faltan INSTANCE_ID, DOMINIO o ssm_run; ejecutar 3.2 y 6.1"
+  elif ! est=$(aws ec2 describe-instances --instance-ids "$INSTANCE_ID" \
+       --query 'Reservations[0].Instances[0].State.Name' --output text 2>&1); then
+    estado="no_verificable"; detalle="falló aws ec2 describe-instances: $(echo "$est" | tr '\n' ' ')"
+  elif [ "$est" != "stopped" ]; then
+    estado="no_verificable"; detalle="la instancia $INSTANCE_ID está en '$est'; se esperaba stopped (ejecutar 6.2 antes)"
+  else
+    SECONDS=0
+    if ! err=$(aws ec2 start-instances --instance-ids "$INSTANCE_ID" 2>&1); then
+      estado="no_verificable"; detalle="falló aws ec2 start-instances: $(echo "$err" | tr '\n' ' ')"
+    else
+      t_run=""; t_ssm=""; t_docker=""; t_health=""; ping=""; docker_ps=""; faltan="$ESPERADOS"; salud=""
+      aws ec2 wait instance-running --instance-ids "$INSTANCE_ID" 2>/dev/null && t_run=$SECONDS
+      while [ -n "$t_run" ] && [ "$SECONDS" -lt "$LIMITE" ]; do
+        if [ -z "$t_ssm" ]; then
+          ping=$(aws ssm describe-instance-information --filters "Key=InstanceIds,Values=$INSTANCE_ID" \
+            --query 'InstanceInformationList[0].PingStatus' --output text 2>/dev/null)
+          [ "$ping" = "Online" ] && t_ssm=$SECONDS
+        fi
+        if [ -n "$t_ssm" ] && [ -z "$t_docker" ]; then
+          docker_ps=$(ssm_run "docker ps --format '{{.Names}} {{.State}}'" 2>/dev/null)
+          faltan=$(for c in $ESPERADOS; do grep -qx "$c running" <<< "$docker_ps" || echo "$c"; done | xargs)
+          [ -z "$faltan" ] && t_docker=$SECONDS
+        fi
+        if [ -z "$t_health" ]; then
+          salud=$(curl -s -m 10 "https://$DOMINIO/api/health-check" 2>/dev/null)
+          [ "$(jq -c . <<< "$salud" 2>/dev/null)" = '{"status":"ok"}' ] && t_health=$SECONDS
+        fi
+        [ -n "$t_ssm" ] && [ -n "$t_docker" ] && [ -n "$t_health" ] && break
+        sleep 10
+      done
+      fallos=()
+      [ -n "$t_run" ] || fallos+=("la instancia no llegó a running (aws ec2 wait instance-running se rindió)")
+      if [ -n "$t_run" ]; then
+        [ -n "$t_ssm" ] && [ "$t_ssm" -le "$LIMITE" ] \
+          || fallos+=("SSM: PingStatus=${ping:-sin registro}${t_ssm:+ a los $t_ssm s}")
+        [ -n "$t_docker" ] && [ "$t_docker" -le "$LIMITE" ] \
+          || fallos+=("docker ps: sin running ${faltan:-(ninguno)}${t_docker:+; completo a los $t_docker s}")
+        [ -n "$t_health" ] && [ "$t_health" -le "$LIMITE" ] \
+          || fallos+=("health-check: '$(echo "${salud:-sin respuesta}" | tr '\n' ' ' | cut -c1-80)'${t_health:+ a los $t_health s}")
+      fi
+      if [ ${#fallos[@]} -eq 0 ]; then
+        estado="aprobado"
+        detalle="$INSTANCE_ID desde start-instances: running a los $t_run s, SSM Online a los $t_ssm s, 5 contenedores running a los $t_docker s, https://$DOMINIO/api/health-check {\"status\":\"ok\"} a los $t_health s (≤ $LIMITE s), sin intervención manual"
+      else
+        estado="no_aprobado"; detalle="no conforme tras ${SECONDS} s desde start-instances: $(printf '%s; ' "${fallos[@]}" | sed 's/; $//')"
+      fi
+    fi
+  fi
+  jq -cn --arg c "$criterio" --arg r "$requisito" --arg e "$estado" --arg d "$detalle" \
+    '{criterio: $c, requisito: $r, estado: $e, detalle: $d}'
+)
+```
+
+Resultado esperado: `aprobado`, normalmente con `running` a los 15 a 30 s, SSM `Online` y los contenedores en 60 a 120 s y el health-check poco después de que `api` y `app_db` estén en ejecución. Cada intento de `ssm_run` mientras la Instancia arranca puede tardar hasta unos 100 s en fallar, así que el bloque puede terminar algo después de los 300 s; los tiempos del `detalle` son los que cuentan, y si alguno pasa de 300 s el criterio queda `no_aprobado`. En ese caso se repite el ciclo 6.2 → 6.3 una vez para descartar el retraso de Run Command.
+
+Justo después, con la Instancia encendida:
+
+1. Se repite 3.8.1 con `MOMENTO=despues` (R19.1): la IP pública debe seguir siendo `PUBLIC_IP`.
+2. Se comprueba que Caddy usó el certificado guardado en `caddy_data` y no pidió otro:
+
+   ```bash
+   CERT_DESPUES=$(openssl s_client -connect "$DOMINIO:443" -servername "$DOMINIO" </dev/null 2>/dev/null \
+     | openssl x509 -noout -serial)
+   [ -n "$CERT_ANTES" ] && [ "$CERT_ANTES" = "$CERT_DESPUES" ] && echo "mismo certificado: $CERT_DESPUES" \
+     || echo "certificado distinto o ausente: antes='$CERT_ANTES' despues='$CERT_DESPUES'"
+   ```
+
+   Resultado esperado: `mismo certificado: serial=...`. Un número distinto no rompe R19.8 si 6.3 quedó `aprobado` (Caddy renueva el certificado cuando le quedan menos de 30 días), pero se anota en el `detalle` y se revisa con `sudo docker volume inspect pgguardian_caddy_data` en la Instancia que el volumen existe.
+
+Ante `no_aprobado` no se reinicia ni se modifica nada a mano para «hacer pasar» el criterio: R19.8 exige que la aplicación vuelva sin intervención. Se diagnostica solo leyendo, en este orden:
+
+| Falla en el `detalle` | Dónde mirar |
+| --- | --- |
+| No llegó a `running` | `aws ec2 describe-instance-status --instance-ids "$INSTANCE_ID" --include-all-instances` y la salida de consola (`aws ec2 get-console-output --instance-id "$INSTANCE_ID" --latest --output text`) |
+| SSM sin `Online` | 3.4.3 y su tabla de diagnóstico (rol, regla de salida del Security Group, salida de consola) |
+| Faltan contenedores | En Session Manager: `systemctl is-enabled docker` (4.7.2), `sudo docker ps -a` y `sudo docker logs --tail 50 <contenedor>`. Si falta `pgguardian_sandboxdb_prod`, revisar `findmnt /srv/sandbox` (3.6.3 y 4.9): sin el Volumen_Sandbox, Docker no lo levanta a propósito |
+| Health-check distinto de `{"status":"ok"}` | `curl -sv "https://$DOMINIO/api/health-check"` desde CloudShell; `sudo docker logs --tail 80 pgguardian_proxy` (certificado) y `sudo docker logs --tail 50 pgguardian_api_prod` (conexión a `app_db`) en la Instancia |
+
+La causa se anota en el `detalle`, se corrige (en la plantilla con change set, o en `bootstrap_host.sh` y `docker-compose.prod.yml`, según el caso) y se repite el ciclo 6.2 → 6.3 completo. La línea anterior se conserva en la evidencia.
+
+Cómo se interpreta 6.3:
+
+| Salida | `estado` | Requisito |
+| --- | --- | --- |
+| SSM `Online`, 5 contenedores `running` y `{"status":"ok"}`, cada uno en ≤ 300 s desde `start-instances` | `aprobado` | R19.8, R24.3 |
+| Alguna de las tres condiciones no se cumple en 300 s, o la Instancia no llega a `running` | `no_aprobado` | R19.8 |
+| Falta una variable, la Instancia no estaba `stopped` o falla `describe-instances`/`start-instances` | `no_verificable` | — |
+
+### 6.4 Resumen de la sección 6
+
+| Criterio | Bloques que deben estar en `aprobado` | Partes en otras secciones |
+| --- | --- | --- |
+| CA-23 | 6.3 (R19.8), 3.8.1 con `MOMENTO=antes` y `MOMENTO=despues` alrededor del ciclo (R19.1) | 3.8 (Elastic IP), 4.7.2 (Docker al arranque), 5.2.1, 5.3.1 y 5.3.2 (certificado, HTTPS y redirección) |
+
+R24.3 (sustitución de RF-03.6) queda respaldado por 6.3 en `aprobado` junto con la entrada del Registro_Decisiones (`docs/aws/decision-log.md`, T-26) y el Presupuesto (sección 7, R20). Un criterio nunca se da por aprobado con un bloque en `no_aprobado` o `no_verificable`: se corrige la causa y se repite el bloque, conservando la línea anterior en la evidencia.
 
 ## 7. Costos
 

@@ -290,6 +290,25 @@
         "chatSessionId": "sess_f626a5a9-c3c3-4a9a-95db-3ab0166bbb99",
         "timestamp": 1795718854060
       }
+    ],
+    "6.4 Sección «Encender y detener» del runbook (sin T-xx; sustituye RF-03.6)": [
+      {
+        "executionId": "7f4eaa74-3b26-4cc9-a98f-a9c353c088cc",
+        "chatSessionId": "sess_40fa9c5c-5ec6-4eee-8a9e-c07c5e624431",
+        "timestamp": 1795720021816
+      },
+      {
+        "executionId": "7f4eaa74-3b26-4cc9-a98f-a9c353c088cc",
+        "chatSessionId": "sess_40fa9c5c-5ec6-4eee-8a9e-c07c5e624431",
+        "timestamp": 1795720233641
+      }
+    ],
+    "6. Fase 4: host y despliegue (T-16 a T-18)": [
+      {
+        "executionId": "7f4eaa74-3b26-4cc9-a98f-a9c353c088cc",
+        "chatSessionId": "sess_40fa9c5c-5ec6-4eee-8a9e-c07c5e624431",
+        "timestamp": 1795720233719
+      }
     ]
   }
 }

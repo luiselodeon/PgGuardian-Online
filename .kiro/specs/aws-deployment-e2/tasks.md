@@ -163,7 +163,7 @@ Lenguajes: Python (FastAPI, unittest), JavaScript (React/Vite), YAML (Compose y 
     - Indicar que el borrado elimina la instancia, los dos discos, la Elastic IP, el rol, el Security Group, el presupuesto, la alarma y las anomalías, y que los snapshots se conservan porque no pertenecen al stack. Anotar también que, al borrar el stack, la cuenta queda sin monitor de anomalías (el por defecto se borró en la comprobación previa de la tarea 5.2) y que, si la cuenta sigue en uso, se puede volver a crear uno de servicios desde la consola de Cost Anomaly Detection.
     - _Requirements: 23.3, 29.8, 29.9_
 
-- [ ] 6. Fase 4: host y despliegue (T-16 a T-18)
+- [x] 6. Fase 4: host y despliegue (T-16 a T-18)
   - [x] 6.1 T-16: Script `scripts/aws/bootstrap_host.sh` (idempotente)
     - Recibe como argumento el output `SandboxVolumeId` y localiza el dispositivo NVMe en `/dev/disk/by-id/nvme-Amazon_Elastic_Block_Store_vol<id sin guion>`, no en `/dev/sdf`. La plantilla no lleva `UserData`, así que el script se ejecuta por Session Manager.
     - Formateo con `mkfs.ext4` solo si falta sistema de archivos, entrada `/etc/fstab` por UUID con `nofail` y montaje.
@@ -187,7 +187,7 @@ Lenguajes: Python (FastAPI, unittest), JavaScript (React/Vite), YAML (Compose y 
     - Añadir a la sección despliegue de `docs/aws/runbook.md` los comandos de verificación: certificado de Let's Encrypt vigente, redirección HTTP→HTTPS (`curl -I http://<dominio>`) y `curl -sI https://<dominio>` con las cinco cabeceras y 0 `Server`.
     - _RF-06.8, RF-03.4 (E1), RF-04.5 · CA-13, CA-23 · Requirements: 4.4, 5.6, 19.3, 19.4, 19.5, 19.6, 19.7_
 
-  - [ ] 6.4 Sección «Encender y detener» del runbook (sin T-xx; sustituye RF-03.6)
+  - [x] 6.4 Sección «Encender y detener» del runbook (sin T-xx; sustituye RF-03.6)
     - Añadir a `docs/aws/runbook.md` la sección «Encender y detener» con `aws ec2 stop-instances --instance-ids <InstanceId>` y `aws ec2 start-instances --instance-ids <InstanceId>`, usando el output `InstanceId` del stack (`aws cloudformation describe-stacks --stack-name pgguardian --query "Stacks[0].Outputs"`, tarea 5.2), y `aws ec2 wait instance-stopped` / `instance-running` para esperar cada estado.
     - Verificación tras encender, sin intervención manual y en ≤ 5 min desde el inicio: la Instancia aparece `Online` en SSM (`aws ssm describe-instance-information`); `docker ps` muestra los 5 contenedores en ejecución, porque los servicios tienen `restart: unless-stopped` y Docker arranca con el sistema (tarea 6.1); y `curl https://<dominio>/api/health-check` devuelve `{"status":"ok"}`. Anotar el resultado con el formato «Resultado de verificación».
     - Nota: la Elastic IP conserva la dirección y Caddy guarda el certificado en el volumen `caddy_data`, así que la URL y el HTTPS no cambian.
