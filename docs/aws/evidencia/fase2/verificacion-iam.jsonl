@@ -6,3 +6,5 @@
 {"criterio":"CA-15","requisito":"R8.3","estado":"aprobado","detalle":"IAM access to billing activado; jesus.avila abre Billing and Cost Management sin acceso denegado (captura 2026-11-25)"}
 {"criterio":"CA-17","requisito":"R10.3","estado":"aprobado","detalle":"i-06ed7dab83c04f8bb Online en Systems Manager (Ubuntu 24.04) tras CREATE_COMPLETE, 2026-11-26"}
 {"criterio":"CA-17","requisito":"R10.2","estado":"aprobado","detalle":"la instancia i-06ed7dab83c04f8bb usa arn:aws:iam::<cuenta>:instance-profile/PgGuardian-EC2-Role, asociado a PgGuardian-EC2-Role"}
+{"criterio":"CA-17","requisito":"R10.2","estado":"aprobado","detalle":"credenciales temporales de PgGuardian-EC2-Role por IMDS (AWS-HMAC expira 2026-11-26T10:23:05Z); sin claves de acceso en /etc /root /home /opt /srv"}
+{"criterio":"CA-17","requisito":"R10.1","estado":"aprobado","detalle":"PgGuardian-EC2-Role tiene adjuntas: [\"arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore\"]"}
