@@ -1,0 +1,6 @@
+{"criterio":"CA-15","requisito":"R8","estado":"aprobado","detalle":"AccountMFAEnabled=1, AccountAccessKeysPresent=0"}
+{"criterio":"CA-15","requisito":"R9.1, R9.4, R9.5","estado":"no_aprobado","detalle":"no conforme: 3 de 4 usuarios: david.ceballos: mfa_active=false; emiliano.cabanas: mfa_active=false; luis.arias: mfa_active=false"}
+{"criterio":"CA-16","requisito":"R9.2, R9.3","estado":"aprobado","detalle":"PgG-Admins con AdministratorAccess y Force_MFA (arn:aws:iam::<cuenta>:policy/Force_MFA, versión v1); Deny con NotAction de 10 acciones de autogestión y BoolIfExists aws:MultiFactorAuthPresent=false; Allow limitado a ${aws:username}; miembros: david.ceballos,luis.arias,emiliano.cabanas,jesus.avila"}
+{"criterio":"CA-16","requisito":"R9.6","estado":"aprobado","detalle":"arn:aws:iam::<cuenta>:user/jesus.avila ejecutó ec2:DescribeRegions con MFA sin AccessDenied (18 regiones)"}
+
+{"criterio":"CA-15","requisito":"R8.3","estado":"aprobado","detalle":"IAM access to billing activado; jesus.avila abre Billing and Cost Management sin acceso denegado (captura 2026-11-25)"}

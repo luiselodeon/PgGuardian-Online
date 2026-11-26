@@ -1,0 +1,261 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >-
+  PgGuardian (Entregable 2) - stack pgguardian. Rol EC2 con SSM, Security Group
+  80/443, instancia t3.small Ubuntu 24.04 con IMDSv2, disco raiz y Volumen_Sandbox
+  cifrados, Elastic IP, presupuesto mensual, Cost Anomaly Detection y alarma de
+  recuperacion automatica. Usuarios IAM, host, .env, aplicacion y snapshots
+  quedan fuera de esta plantilla (R29.5).
+
+# Despliegue: ver docs/aws/runbook.md, seccion "Stack".
+# Requiere --capabilities CAPABILITY_NAMED_IAM (el rol tiene nombre fijo).
+
+Parameters:
+  VpcId:
+    Type: AWS::EC2::VPC::Id
+    Description: VPC donde se crea el Security Group.
+  SubnetId:
+    Type: AWS::EC2::Subnet::Id
+    Description: Subred publica de la instancia (fija la zona de disponibilidad del Volumen_Sandbox).
+  AmiId:
+    Type: AWS::EC2::Image::Id
+    Description: >-
+      AMI de Ubuntu 24.04 (amd64, gp3). Primer despliegue: valor de
+      /aws/service/canonical/ubuntu/server/24.04/stable/current/amd64/hvm/ebs-gp3/ami-id.
+      Actualizaciones: UsePreviousValue=true (R29.2).
+  Owner:
+    Type: String
+    MinLength: 1
+    MaxLength: 256
+    Description: Valor de la etiqueta Owner (1 a 256 caracteres, R17).
+  AlertEmail:
+    Type: String
+    AllowedPattern: "^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$"
+    ConstraintDescription: Debe ser una direccion de correo valida.
+    Description: Correo que recibe las alertas del presupuesto y el resumen diario de anomalias.
+  MonthlyBudgetUsd:
+    Type: Number
+    Default: 30
+    MinValue: 1
+    Description: Monto mensual del presupuesto en USD (R20.1 exige 30).
+
+Resources:
+  # T-11 / R10: rol de la instancia con Session Manager, sin claves en disco.
+  Ec2Role:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: PgGuardian-EC2-Role
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ec2.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - !Sub arn:${AWS::Partition}:iam::aws:policy/AmazonSSMManagedInstanceCore
+
+  Ec2InstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      InstanceProfileName: PgGuardian-EC2-Role
+      Roles:
+        - !Ref Ec2Role
+
+  # T-12 / R11.1, R12: exactamente 2 reglas de entrada, sin 22 ni ::/0.
+  AppSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: PgGuardian - solo HTTP y HTTPS de entrada
+      VpcId: !Ref VpcId
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+          Description: HTTP (redireccion a HTTPS y reto ACME)
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: 0.0.0.0/0
+          Description: HTTPS
+      SecurityGroupEgress:
+        - IpProtocol: "-1"
+          CidrIp: 0.0.0.0/0
+          Description: Salida (Let's Encrypt, apt, SSM, imagenes)
+
+  # T-13 / R10, R11.2, R13, R14.1, R16, R17: sin KeyName ni UserData.
+  Instance:
+    Type: AWS::EC2::Instance
+    Properties:
+      ImageId: !Ref AmiId
+      InstanceType: t3.small
+      SubnetId: !Ref SubnetId
+      SecurityGroupIds:
+        - !Ref AppSecurityGroup
+      IamInstanceProfile: !Ref Ec2InstanceProfile
+      MetadataOptions:
+        HttpTokens: required
+        HttpEndpoint: enabled
+        HttpPutResponseHopLimit: 1
+      BlockDeviceMappings:
+        - DeviceName: /dev/sda1
+          Ebs:
+            VolumeType: gp3
+            VolumeSize: 20
+            Encrypted: true
+            DeleteOnTermination: true
+      DisableApiTermination: true
+      PropagateTagsToVolumeOnCreation: true
+      Tags:
+        - Key: Name
+          Value: pgguardian
+        - Key: Project
+          Value: PgGuardian
+        - Key: Env
+          Value: prod
+        - Key: Owner
+          Value: !Ref Owner
+
+  # T-14 / R4.5, R14.2: Volumen_Sandbox en la misma AZ que la instancia.
+  SandboxVolume:
+    Type: AWS::EC2::Volume
+    Properties:
+      AvailabilityZone: !GetAtt Instance.AvailabilityZone
+      VolumeType: gp3
+      Size: 8
+      Encrypted: true
+      Tags:
+        - Key: Name
+          Value: pgguardian-sandbox
+        - Key: Project
+          Value: PgGuardian
+        - Key: Env
+          Value: prod
+        - Key: Owner
+          Value: !Ref Owner
+
+  SandboxVolumeAttachment:
+    Type: AWS::EC2::VolumeAttachment
+    Properties:
+      InstanceId: !Ref Instance
+      VolumeId: !Ref SandboxVolume
+      Device: /dev/sdf
+
+  # T-15 / R19.1
+  ElasticIp:
+    Type: AWS::EC2::EIP
+    Properties:
+      Domain: vpc
+      InstanceId: !Ref Instance
+      Tags:
+        - Key: Name
+          Value: pgguardian
+        - Key: Project
+          Value: PgGuardian
+        - Key: Env
+          Value: prod
+        - Key: Owner
+          Value: !Ref Owner
+
+  # T-19 / R20: gasto bruto (sin creditos ni reembolsos), 4 notificaciones.
+  MonthlyBudget:
+    Type: AWS::Budgets::Budget
+    Properties:
+      Budget:
+        BudgetName: PgGuardian-Mensual
+        BudgetType: COST
+        TimeUnit: MONTHLY
+        BudgetLimit:
+          Amount: !Ref MonthlyBudgetUsd
+          Unit: USD
+        CostTypes:
+          IncludeCredit: false
+          IncludeRefund: false
+      NotificationsWithSubscribers:
+        - Notification:
+            NotificationType: ACTUAL
+            ComparisonOperator: GREATER_THAN
+            Threshold: 50
+            ThresholdType: PERCENTAGE
+          Subscribers:
+            - SubscriptionType: EMAIL
+              Address: !Ref AlertEmail
+        - Notification:
+            NotificationType: ACTUAL
+            ComparisonOperator: GREATER_THAN
+            Threshold: 80
+            ThresholdType: PERCENTAGE
+          Subscribers:
+            - SubscriptionType: EMAIL
+              Address: !Ref AlertEmail
+        - Notification:
+            NotificationType: ACTUAL
+            ComparisonOperator: GREATER_THAN
+            Threshold: 100
+            ThresholdType: PERCENTAGE
+          Subscribers:
+            - SubscriptionType: EMAIL
+              Address: !Ref AlertEmail
+        - Notification:
+            NotificationType: FORECASTED
+            ComparisonOperator: GREATER_THAN
+            Threshold: 100
+            ThresholdType: PERCENTAGE
+          Subscribers:
+            - SubscriptionType: EMAIL
+              Address: !Ref AlertEmail
+
+  # T-21 / R22: recuperacion automatica ante fallo del sistema.
+  RecoverAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: PgGuardian-Recover
+      AlarmDescription: Recupera la instancia si StatusCheckFailed_System falla 2 minutos seguidos.
+      Namespace: AWS/EC2
+      MetricName: StatusCheckFailed_System
+      Dimensions:
+        - Name: InstanceId
+          Value: !Ref Instance
+      Statistic: Maximum
+      Period: 60
+      EvaluationPeriods: 2
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !Sub arn:${AWS::Partition}:automate:${AWS::Region}:ec2:recover
+
+  # T-20 / R21: monitor de servicios y resumen diario por correo (R24.10).
+  CostAnomalyMonitor:
+    Type: AWS::CE::AnomalyMonitor
+    Properties:
+      MonitorName: PgGuardian-Services
+      MonitorType: DIMENSIONAL
+      MonitorDimension: SERVICE
+
+  CostAnomalySubscription:
+    Type: AWS::CE::AnomalySubscription
+    Properties:
+      SubscriptionName: PgGuardian-Daily
+      Frequency: DAILY
+      MonitorArnList:
+        - !Ref CostAnomalyMonitor
+      Subscribers:
+        - Type: EMAIL
+          Address: !Ref AlertEmail
+      ThresholdExpression: >-
+        {"Dimensions":{"Key":"ANOMALY_TOTAL_IMPACT_ABSOLUTE","MatchOptions":["GREATER_THAN_OR_EQUAL"],"Values":["1"]}}
+
+Outputs:
+  InstanceId:
+    Description: ID de la instancia (runbook, encender y detener, snapshots).
+    Value: !Ref Instance
+  PublicIp:
+    Description: Elastic IP de la instancia.
+    Value: !Ref ElasticIp
+  AppDomain:
+    Description: Dominio sslip.io (IP con guiones), valor de APP_DOMAIN para make_env.sh.
+    Value: !Join ["", [!Join ["-", !Split [".", !Ref ElasticIp]], ".sslip.io"]]
+  SandboxVolumeId:
+    Description: ID del Volumen_Sandbox (bootstrap_host.sh, manual_snapshot.sh).
+    Value: !Ref SandboxVolume

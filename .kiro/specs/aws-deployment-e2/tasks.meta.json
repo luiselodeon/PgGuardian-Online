@@ -180,6 +180,49 @@
         "chatSessionId": "sess_279e6888-5a02-47a8-88b4-a75cee524be7",
         "timestamp": 1795636487448
       }
+    ],
+    "4.3 T-11: Verificación del rol `PgGuardian-EC2-Role`": [
+      {
+        "executionId": "737cd758-234d-4346-a5d5-6e5f5e6448f6",
+        "chatSessionId": "sess_c4ed09b1-0615-4292-a403-1194ce0d625f",
+        "timestamp": 1795658010446
+      },
+      {
+        "executionId": "737cd758-234d-4346-a5d5-6e5f5e6448f6",
+        "chatSessionId": "sess_c4ed09b1-0615-4292-a403-1194ce0d625f",
+        "timestamp": 1795658247531
+      }
+    ],
+    "4. Fase 2: cuenta e IAM (T-09, T-10, T-11)": [
+      {
+        "executionId": "737cd758-234d-4346-a5d5-6e5f5e6448f6",
+        "chatSessionId": "sess_c4ed09b1-0615-4292-a403-1194ce0d625f",
+        "timestamp": 1795658247674
+      }
+    ],
+    "5.1 Escribir `infra/cloudformation/pgguardian.yaml` y validarlo con `cfn-lint`": [
+      {
+        "executionId": "c538589c-58b4-4215-abd9-23792ac4ecca",
+        "chatSessionId": "sess_97757f00-fbd2-4287-aeb0-45e5cc20f55d",
+        "timestamp": 1795658619913
+      },
+      {
+        "executionId": "c538589c-58b4-4215-abd9-23792ac4ecca",
+        "chatSessionId": "sess_97757f00-fbd2-4287-aeb0-45e5cc20f55d",
+        "timestamp": 1795658836511
+      }
+    ],
+    "5.2 Runbook: despliegue del stack con change set y lectura de outputs": [
+      {
+        "executionId": "1e44d92b-16a7-49b2-9633-6c689efd91a2",
+        "chatSessionId": "sess_03f1fa5d-de6f-421c-af51-a33032f5effa",
+        "timestamp": 1795659003987
+      },
+      {
+        "executionId": "1e44d92b-16a7-49b2-9633-6c689efd91a2",
+        "chatSessionId": "sess_03f1fa5d-de6f-421c-af51-a33032f5effa",
+        "timestamp": 1795659401653
+      }
     ]
   }
 }

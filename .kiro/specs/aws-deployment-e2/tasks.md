@@ -94,7 +94,7 @@ Lenguajes: Python (FastAPI, unittest), JavaScript (React/Vite), YAML (Compose y 
 - [x] 3. Checkpoint: Fase 1
   - Ensure all tests pass, ask the user if questions arise.
 
-- [ ] 4. Fase 2: cuenta e IAM (T-09, T-10, T-11)
+- [x] 4. Fase 2: cuenta e IAM (T-09, T-10, T-11)
   - [x] 4.1 T-09: Runbook y verificación de la cuenta raíz
     - Crear `docs/aws/runbook.md` con las ocho secciones (raíz/IAM, stack, instancia, host, despliegue, encender y detener, costos, snapshots) y el formato común de «Resultado de verificación» (`criterio`, `requisito`, `estado` `aprobado|no_aprobado|no_verificable`, `detalle`).
     - En la sección raíz/IAM: los pasos manuales de MFA de la cuenta raíz y de acceso IAM a facturación, y los comandos de verificación con `aws iam get-account-summary`. Aprobado solo con `AccountMFAEnabled=1` y `AccountAccessKeysPresent=0`; no conforme indicando la condición fallida; no verificable con la causa si la consulta falla o falta un valor. La verificación no modifica la cuenta.
@@ -118,13 +118,13 @@ Lenguajes: Python (FastAPI, unittest), JavaScript (React/Vite), YAML (Compose y 
       - CA-16 se verifica así, sin usuario de prueba sin MFA.
     - _RF-05.2, RF-05.3 · CA-15, CA-16 · Requirements: 9.1, 9.2, 9.3, 9.4, 9.5, 9.6_
 
-  - [ ] 4.3 T-11: Verificación del rol `PgGuardian-EC2-Role`
+  - [x] 4.3 T-11: Verificación del rol `PgGuardian-EC2-Role`
     - El rol y su perfil de instancia los crea la plantilla (tarea 5.1); esta tarea no crea scripts.
     - Añadir a la sección instancia de `docs/aws/runbook.md` el comando `aws iam list-attached-role-policies --role-name PgGuardian-EC2-Role` (debe listar `AmazonSSMManagedInstanceCore`) y la comprobación de que la instancia usa ese perfil (`aws ec2 describe-instances`, campo `IamInstanceProfile`), con el resultado esperado.
     - _RF-05.4 · CA-17 · Requirements: 10.1, 10.2_
 
 - [ ] 5. Fase 3: stack de CloudFormation `pgguardian` (recursos de T-11 a T-15 y T-19 a T-21)
-  - [ ] 5.1 Escribir `infra/cloudformation/pgguardian.yaml` y validarlo con `cfn-lint`
+  - [x] 5.1 Escribir `infra/cloudformation/pgguardian.yaml` y validarlo con `cfn-lint`
     - Recursos según C15, en un solo stack:
       - T-11: rol `PgGuardian-EC2-Role` con `AmazonSSMManagedInstanceCore` y su perfil de instancia.
       - T-12: Security Group en `VpcId` con exactamente 2 reglas de entrada, TCP 80 y 443 desde `0.0.0.0/0`.
@@ -140,7 +140,7 @@ Lenguajes: Python (FastAPI, unittest), JavaScript (React/Vite), YAML (Compose y 
     - Validar con `cfn-lint infra/cloudformation/pgguardian.yaml` y `aws cloudformation validate-template --template-body file://infra/cloudformation/pgguardian.yaml`, ambos sin errores.
     - _RF-05.4, RF-06.1, RF-06.2, RF-06.3, RF-06.5, RF-06.6, RF-06.8, RF-07.1, RF-07.2, RF-07.3 · CA-17 a CA-21, CA-23 a CA-25 · Requirements: 4.5, 10.1, 10.2, 11.1, 11.2, 12.1, 12.2, 13.1, 14.1, 14.2, 16.1, 17.1, 17.2, 17.3, 19.1, 20.1, 20.2, 20.3, 20.4, 21.1, 21.2, 22.1, 22.2, 22.3, 29.1, 29.2, 29.3, 29.4, 29.5, 29.6_
 
-  - [ ] 5.2 Runbook: despliegue del stack con change set y lectura de outputs
+  - [x] 5.2 Runbook: despliegue del stack con change set y lectura de outputs
     - Añadir a la sección stack de `docs/aws/runbook.md` el procedimiento de C15: `cfn-lint` y `validate-template`; solo antes del primer despliegue, `aws ssm get-parameter --name /aws/service/canonical/ubuntu/server/24.04/stable/current/amd64/hvm/ebs-gp3/ami-id --query Parameter.Value --output text` para obtener el ID de la AMI; `aws cloudformation create-change-set --stack-name pgguardian --change-set-type CREATE --capabilities CAPABILITY_NAMED_IAM` con los cinco parámetros obligatorios, ese ID como `AmiId`; `wait change-set-create-complete`; revisión con `describe-change-set` (acción, recurso lógico, tipo y `Replacement`); `execute-change-set` solo después de la revisión; `wait stack-create-complete`; `update-termination-protection --enable-termination-protection`; y `describe-stacks` con `EnableTerminationProtection=true`.
     - Comprobación previa al primer despliegue, antes de `create-change-set` (AWS permite un solo monitor de anomalías de servicios por cuenta): `aws ce get-anomaly-monitors --query "AnomalyMonitors[?MonitorType=='DIMENSIONAL']"`. Si existe uno (en esta cuenta, `Default-Services-Monitor`, con `Default-Services-Subscription` de umbral 100 USD y 40 %), guardar primero como evidencia en `docs/aws/evidencia/` la salida de ese comando y la de `aws ce get-anomaly-subscriptions --monitor-arn <arn>`; después borrar sus suscripciones con `aws ce delete-anomaly-subscription --subscription-arn <arn>` y, al final, el monitor con `aws ce delete-anomaly-monitor --monitor-arn <arn>`. Repetir la primera consulta y confirmar que devuelve una lista vacía. Decisión registrada en `docs/aws/decision-log.md` («Monitor de anomalías por defecto reemplazado por el del stack»).
     - Actualizaciones: mismo procedimiento con `--change-set-type UPDATE` y `ParameterKey=AmiId,UsePreviousValue=true` (y `UsePreviousValue=true` en los demás parámetros que no cambian); como segunda barrera, no ejecutar el change set si `Instance` aparece con `Replacement=True`.
