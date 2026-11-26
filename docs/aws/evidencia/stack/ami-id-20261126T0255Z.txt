@@ -1,0 +1,1 @@
+ami-09cdee81def788c75	ubuntu/images/hvm-ssd-gp3/ubuntu-noble-24.04-amd64-server-20261120	2026-11-20T11:09:31.000Z

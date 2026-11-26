@@ -4,3 +4,5 @@
 {"criterio":"CA-16","requisito":"R9.6","estado":"aprobado","detalle":"arn:aws:iam::<cuenta>:user/jesus.avila ejecutó ec2:DescribeRegions con MFA sin AccessDenied (18 regiones)"}
 
 {"criterio":"CA-15","requisito":"R8.3","estado":"aprobado","detalle":"IAM access to billing activado; jesus.avila abre Billing and Cost Management sin acceso denegado (captura 2026-11-25)"}
+{"criterio":"CA-17","requisito":"R10.3","estado":"aprobado","detalle":"i-06ed7dab83c04f8bb Online en Systems Manager (Ubuntu 24.04) tras CREATE_COMPLETE, 2026-11-26"}
+{"criterio":"CA-17","requisito":"R10.2","estado":"aprobado","detalle":"la instancia i-06ed7dab83c04f8bb usa arn:aws:iam::<cuenta>:instance-profile/PgGuardian-EC2-Role, asociado a PgGuardian-EC2-Role"}

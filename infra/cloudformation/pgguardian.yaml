@@ -81,7 +81,7 @@ Resources:
       SecurityGroupEgress:
         - IpProtocol: "-1"
           CidrIp: 0.0.0.0/0
-          Description: Salida (Let's Encrypt, apt, SSM, imagenes)
+          Description: Salida (Lets Encrypt, apt, SSM, imagenes)
 
   # T-13 / R10, R11.2, R13, R14.1, R16, R17: sin KeyName ni UserData.
   Instance:

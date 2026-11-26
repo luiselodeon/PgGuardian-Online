@@ -1,0 +1,15 @@
+----------------------------------------------------------------------------
+|                             DescribeChangeSet                            |
++-----+---------------------------+--------------------------------+-------+
+|  Add|  AppSecurityGroup         |  AWS::EC2::SecurityGroup       |  None |
+|  Add|  CostAnomalyMonitor       |  AWS::CE::AnomalyMonitor       |  None |
+|  Add|  CostAnomalySubscription  |  AWS::CE::AnomalySubscription  |  None |
+|  Add|  Ec2InstanceProfile       |  AWS::IAM::InstanceProfile     |  None |
+|  Add|  Ec2Role                  |  AWS::IAM::Role                |  None |
+|  Add|  ElasticIp                |  AWS::EC2::EIP                 |  None |
+|  Add|  Instance                 |  AWS::EC2::Instance            |  None |
+|  Add|  MonthlyBudget            |  AWS::Budgets::Budget          |  None |
+|  Add|  RecoverAlarm             |  AWS::CloudWatch::Alarm        |  None |
+|  Add|  SandboxVolumeAttachment  |  AWS::EC2::VolumeAttachment    |  None |
+|  Add|  SandboxVolume            |  AWS::EC2::Volume              |  None |
++-----+---------------------------+--------------------------------+-------+

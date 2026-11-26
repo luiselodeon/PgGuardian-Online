@@ -1,0 +1,22 @@
+[
+    {
+        "OutputKey": "SandboxVolumeId",
+        "OutputValue": "vol-0ce09703b3674e7ac",
+        "Description": "ID del Volumen_Sandbox (bootstrap_host.sh, manual_snapshot.sh)."
+    },
+    {
+        "OutputKey": "AppDomain",
+        "OutputValue": "3-14-31-64.sslip.io",
+        "Description": "Dominio sslip.io (IP con guiones), valor de APP_DOMAIN para make_env.sh."
+    },
+    {
+        "OutputKey": "InstanceId",
+        "OutputValue": "i-06ed7dab83c04f8bb",
+        "Description": "ID de la instancia (runbook, encender y detener, snapshots)."
+    },
+    {
+        "OutputKey": "PublicIp",
+        "OutputValue": "3.14.31.64",
+        "Description": "Elastic IP de la instancia."
+    }
+]

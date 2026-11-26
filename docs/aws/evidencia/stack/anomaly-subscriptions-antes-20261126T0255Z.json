@@ -1,0 +1,46 @@
+{
+    "AnomalySubscriptions": [
+        {
+            "SubscriptionArn": "arn:aws:ce::<cuenta>:anomalysubscription/a34c94f5-c4d6-4c5e-96a7-0a6498741220",
+            "AccountId": "<cuenta>",
+            "MonitorArnList": [
+                "arn:aws:ce::<cuenta>:anomalymonitor/099de64d-94e6-4616-a5ff-4a6c5c1b8ffe"
+            ],
+            "Subscribers": [
+                {
+                    "Address": "<correo>",
+                    "Type": "EMAIL",
+                    "Status": "CONFIRMED"
+                }
+            ],
+            "Frequency": "DAILY",
+            "SubscriptionName": "Default-Services-Subscription",
+            "ThresholdExpression": {
+                "And": [
+                    {
+                        "Dimensions": {
+                            "Key": "ANOMALY_TOTAL_IMPACT_ABSOLUTE",
+                            "Values": [
+                                "100.0"
+                            ],
+                            "MatchOptions": [
+                                "GREATER_THAN_OR_EQUAL"
+                            ]
+                        }
+                    },
+                    {
+                        "Dimensions": {
+                            "Key": "ANOMALY_TOTAL_IMPACT_PERCENTAGE",
+                            "Values": [
+                                "40.0"
+                            ],
+                            "MatchOptions": [
+                                "GREATER_THAN_OR_EQUAL"
+                            ]
+                        }
+                    }
+                ]
+            }
+        }
+    ]
+}
