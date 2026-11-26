@@ -186,7 +186,7 @@ fi
 # ------------------------------------------------------------------- CA-09 (R1)
 # JWT_SECRET vacío solo en el entorno del proceso hijo; el entorno del proceso
 # tiene prioridad sobre el .env, que no se modifica.
-JWT_SECRET= docker compose -p "$PROJECT" -f "$COMPOSE_FILE" config >/dev/null 2>"$TMPDIR_V/ca09_err"
+JWT_SECRET='' docker compose -p "$PROJECT" -f "$COMPOSE_FILE" config >/dev/null 2>"$TMPDIR_V/ca09_err"
 CA09_EXIT=$?
 if grep -q "falta JWT_SECRET" "$TMPDIR_V/ca09_err"; then MSG="presente"; else MSG="ausente"; fi
 if [ "$CA09_EXIT" -ne 0 ] && [ "$MSG" = "presente" ]; then OK=0; else OK=1; fi

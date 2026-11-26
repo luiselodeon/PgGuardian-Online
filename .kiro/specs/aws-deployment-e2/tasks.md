@@ -225,7 +225,7 @@ Lenguajes: Python (FastAPI, unittest), JavaScript (React/Vite), YAML (Compose y 
     - Incluir el caso en que no se puede confirmar el no uso: conservar el secreto y registrar el motivo.
     - _Limpieza de la cuenta · Requirements: 27.1, 27.2, 27.3, 27.4_
 
-- [ ] 8. Checkpoint: infraestructura y scripts
+- [x] 8. Checkpoint: infraestructura y scripts
   - Ensure all tests pass, ask the user if questions arise.
 
 - [ ] 9. Fase 6: evidencia, registro de decisiones y documentación (T-23 a T-26)
