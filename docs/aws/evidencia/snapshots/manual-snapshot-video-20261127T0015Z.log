@@ -1,0 +1,60 @@
+
+==> [1] Precondiciones (argumentos, aws, jq, región e identidad)
+    región: us-east-2
+    identidad: arn:aws:iam::<cuenta>:user/jesus.avila
+    volumen pedido: raiz; motivo: video
+
+==> [2] Volumen (outputs del stack pgguardian y describe-instances)
+    instancia: i-06ed7dab83c04f8bb; disco raíz: vol-0b1efc51a5925d766; Volumen_Sandbox: vol-0ce09703b3674e7ac
+    disco: raiz; volumen: vol-0b1efc51a5925d766 (20 GiB gp3, us-east-2a, in-use)
+
+==> [3] Etiquetas del snapshot (Project, Env, Owner)
+    Project=PgGuardian Env=prod Owner=Chus Avila
+
+==> [4] Creación del snapshot (aws ec2 create-snapshot)
+    vol-0b1efc51a5925d766 -> snap-083314680f2d0d9e2
+    descripción: PgGuardian: snapshot manual (video) del disco raiz vol-0b1efc51a5925d766 2026-11-27T00:15:26Z
+
+==> [5] Espera hasta completed (aws ec2 wait snapshot-completed)
+    snap-083314680f2d0d9e2 en completed.
+
+==> [6] Verificación con describe-snapshots (sin restaurar)
+    snap-083314680f2d0d9e2: completed 100%, 20 GiB, inicio 2026-11-27T00:15:27.298000+00:00, cifrado=true
+    etiquetas: Project=PgGuardian Env=prod Owner=Chus Avila
+
+==> [7] Resumen
+    disco raiz (vol-0b1efc51a5925d766) -> snap-083314680f2d0d9e2, completed, motivo video.
+    El snapshot no pertenece al stack y se conserva si se borra el stack.
+
+RESULTADO: 2026-11-27T00:15:27.298000+00:00 raiz vol-0b1efc51a5925d766 snap-083314680f2d0d9e2 completed video
+manual_snapshot.sh terminó sin errores.
+
+==> [1] Precondiciones (argumentos, aws, jq, región e identidad)
+    región: us-east-2
+    identidad: arn:aws:iam::<cuenta>:user/jesus.avila
+    volumen pedido: sandbox; motivo: video
+
+==> [2] Volumen (outputs del stack pgguardian y describe-instances)
+    instancia: i-06ed7dab83c04f8bb; disco raíz: vol-0b1efc51a5925d766; Volumen_Sandbox: vol-0ce09703b3674e7ac
+    disco: sandbox; volumen: vol-0ce09703b3674e7ac (8 GiB gp3, us-east-2a, in-use)
+
+==> [3] Etiquetas del snapshot (Project, Env, Owner)
+    Project=PgGuardian Env=prod Owner=Chus Avila
+
+==> [4] Creación del snapshot (aws ec2 create-snapshot)
+    vol-0ce09703b3674e7ac -> snap-07bec037eb36ccee3
+    descripción: PgGuardian: snapshot manual (video) del disco sandbox vol-0ce09703b3674e7ac 2026-11-27T00:16:34Z
+
+==> [5] Espera hasta completed (aws ec2 wait snapshot-completed)
+    snap-07bec037eb36ccee3 en completed.
+
+==> [6] Verificación con describe-snapshots (sin restaurar)
+    snap-07bec037eb36ccee3: completed 100%, 8 GiB, inicio 2026-11-27T00:16:35.755000+00:00, cifrado=true
+    etiquetas: Project=PgGuardian Env=prod Owner=Chus Avila
+
+==> [7] Resumen
+    disco sandbox (vol-0ce09703b3674e7ac) -> snap-07bec037eb36ccee3, completed, motivo video.
+    El snapshot no pertenece al stack y se conserva si se borra el stack.
+
+RESULTADO: 2026-11-27T00:16:35.755000+00:00 sandbox vol-0ce09703b3674e7ac snap-07bec037eb36ccee3 completed video
+manual_snapshot.sh terminó sin errores.

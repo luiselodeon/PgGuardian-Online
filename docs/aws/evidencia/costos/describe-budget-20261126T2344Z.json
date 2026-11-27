@@ -1,0 +1,14 @@
+{
+    "BudgetName": "PgGuardian-Mensual",
+    "BudgetType": "COST",
+    "TimeUnit": "MONTHLY",
+    "BudgetLimit": {
+        "Amount": "30.0",
+        "Unit": "USD"
+    },
+    "TimePeriodStart": "2026-11-01T00:00:00+00:00",
+    "CostTypes": {
+        "IncludeCredit": false,
+        "IncludeRefund": false
+    }
+}

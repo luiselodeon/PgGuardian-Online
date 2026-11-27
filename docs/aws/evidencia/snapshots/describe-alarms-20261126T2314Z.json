@@ -1,0 +1,30 @@
+{
+    "AlarmName": "PgGuardian-Recover",
+    "AlarmArn": "arn:aws:cloudwatch:us-east-2:<cuenta>:alarm:PgGuardian-Recover",
+    "Namespace": "AWS/EC2",
+    "MetricName": "StatusCheckFailed_System",
+    "Dimensions": [
+        {
+            "Name": "InstanceId",
+            "Value": "i-06ed7dab83c04f8bb"
+        }
+    ],
+    "Statistic": "Maximum",
+    "Period": 60,
+    "EvaluationPeriods": 2,
+    "DatapointsToAlarm": null,
+    "Threshold": 1.0,
+    "ComparisonOperator": "GreaterThanOrEqualToThreshold",
+    "TreatMissingData": "notBreaching",
+    "ActionsEnabled": true,
+    "AlarmActions": [
+        "arn:aws:automate:us-east-2:ec2:recover"
+    ],
+    "OKActions": [],
+    "InsufficientDataActions": [],
+    "StateValue": "OK"
+}
+{
+    "InstanceType": "t3.small",
+    "AutoRecoverySupported": true
+}

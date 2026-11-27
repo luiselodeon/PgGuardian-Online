@@ -1,0 +1,32 @@
+== {"NotificationType":"ACTUAL","ComparisonOperator":"GREATER_THAN","Threshold":100.0,"ThresholdType":"PERCENTAGE"}
+-------------------------------------
+|DescribeSubscribersForNotification |
++-------------------------+---------+
+|        Direccion        |  Tipo   |
++-------------------------+---------+
+|  jesus_avila@anahuac.mx |  EMAIL  |
++-------------------------+---------+
+== {"NotificationType":"ACTUAL","ComparisonOperator":"GREATER_THAN","Threshold":50.0,"ThresholdType":"PERCENTAGE"}
+-------------------------------------
+|DescribeSubscribersForNotification |
++-------------------------+---------+
+|        Direccion        |  Tipo   |
++-------------------------+---------+
+|  jesus_avila@anahuac.mx |  EMAIL  |
++-------------------------+---------+
+== {"NotificationType":"ACTUAL","ComparisonOperator":"GREATER_THAN","Threshold":80.0,"ThresholdType":"PERCENTAGE"}
+-------------------------------------
+|DescribeSubscribersForNotification |
++-------------------------+---------+
+|        Direccion        |  Tipo   |
++-------------------------+---------+
+|  jesus_avila@anahuac.mx |  EMAIL  |
++-------------------------+---------+
+== {"NotificationType":"FORECASTED","ComparisonOperator":"GREATER_THAN","Threshold":100.0,"ThresholdType":"PERCENTAGE"}
+-------------------------------------
+|DescribeSubscribersForNotification |
++-------------------------+---------+
+|        Direccion        |  Tipo   |
++-------------------------+---------+
+|  jesus_avila@anahuac.mx |  EMAIL  |
++-------------------------+---------+

@@ -1,0 +1,13 @@
+{
+    "AnomalyMonitors": [
+        {
+            "MonitorArn": "arn:aws:ce::<cuenta>:anomalymonitor/ba580ffc-c32b-4b69-99b8-434d9e4ae290",
+            "MonitorName": "PgGuardian-Services",
+            "CreationDate": "2026-11-26T03:23:04.009161333Z",
+            "LastUpdatedDate": "2026-11-26T03:23:04.009Z",
+            "MonitorType": "DIMENSIONAL",
+            "MonitorDimension": "SERVICE",
+            "DimensionalValueCount": 0
+        }
+    ]
+}

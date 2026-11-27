@@ -1,0 +1,2 @@
+RESULTADO: 2026-11-27T00:15:27.298000+00:00 raiz vol-0b1efc51a5925d766 snap-083314680f2d0d9e2 completed video
+RESULTADO: 2026-11-27T00:16:35.755000+00:00 sandbox vol-0ce09703b3674e7ac snap-07bec037eb36ccee3 completed video

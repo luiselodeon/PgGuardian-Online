@@ -1,0 +1,32 @@
+{
+    "AnomalySubscriptions": [
+        {
+            "SubscriptionArn": "arn:aws:ce::<cuenta>:anomalysubscription/5a044b8c-4a0a-4319-8db4-14d76e57e6cc",
+            "AccountId": "<cuenta>",
+            "MonitorArnList": [
+                "arn:aws:ce::<cuenta>:anomalymonitor/ba580ffc-c32b-4b69-99b8-434d9e4ae290"
+            ],
+            "Subscribers": [
+                {
+                    "Address": "jesus_avila@anahuac.mx",
+                    "Type": "EMAIL",
+                    "Status": "CONFIRMED"
+                }
+            ],
+            "Threshold": 1.0,
+            "Frequency": "DAILY",
+            "SubscriptionName": "PgGuardian-Daily",
+            "ThresholdExpression": {
+                "Dimensions": {
+                    "Key": "ANOMALY_TOTAL_IMPACT_ABSOLUTE",
+                    "Values": [
+                        "1"
+                    ],
+                    "MatchOptions": [
+                        "GREATER_THAN_OR_EQUAL"
+                    ]
+                }
+            }
+        }
+    ]
+}

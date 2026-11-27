@@ -1,0 +1,60 @@
+
+==> [1] Precondiciones (argumentos, aws, jq, región e identidad)
+    región: us-east-2
+    identidad: arn:aws:iam::<cuenta>:user/jesus.avila
+    volumen pedido: raiz; motivo: estabilizacion
+
+==> [2] Volumen (outputs del stack pgguardian y describe-instances)
+    instancia: i-06ed7dab83c04f8bb; disco raíz: vol-0b1efc51a5925d766; Volumen_Sandbox: vol-0ce09703b3674e7ac
+    disco: raiz; volumen: vol-0b1efc51a5925d766 (20 GiB gp3, us-east-2a, in-use)
+
+==> [3] Etiquetas del snapshot (Project, Env, Owner)
+    Project=PgGuardian Env=prod Owner=Chus Avila
+
+==> [4] Creación del snapshot (aws ec2 create-snapshot)
+    vol-0b1efc51a5925d766 -> snap-0d9ae85bf59f6608a
+    descripción: PgGuardian: snapshot manual (estabilizacion) del disco raiz vol-0b1efc51a5925d766 2026-11-26T23:36:22Z
+
+==> [5] Espera hasta completed (aws ec2 wait snapshot-completed)
+    snap-0d9ae85bf59f6608a en completed.
+
+==> [6] Verificación con describe-snapshots (sin restaurar)
+    snap-0d9ae85bf59f6608a: completed 100%, 20 GiB, inicio 2026-11-26T23:36:23.687000+00:00, cifrado=true
+    etiquetas: Project=PgGuardian Env=prod Owner=Chus Avila
+
+==> [7] Resumen
+    disco raiz (vol-0b1efc51a5925d766) -> snap-0d9ae85bf59f6608a, completed, motivo estabilizacion.
+    El snapshot no pertenece al stack y se conserva si se borra el stack.
+
+RESULTADO: 2026-11-26T23:36:23.687000+00:00 raiz vol-0b1efc51a5925d766 snap-0d9ae85bf59f6608a completed estabilizacion
+manual_snapshot.sh terminó sin errores.
+
+==> [1] Precondiciones (argumentos, aws, jq, región e identidad)
+    región: us-east-2
+    identidad: arn:aws:iam::<cuenta>:user/jesus.avila
+    volumen pedido: sandbox; motivo: estabilizacion
+
+==> [2] Volumen (outputs del stack pgguardian y describe-instances)
+    instancia: i-06ed7dab83c04f8bb; disco raíz: vol-0b1efc51a5925d766; Volumen_Sandbox: vol-0ce09703b3674e7ac
+    disco: sandbox; volumen: vol-0ce09703b3674e7ac (8 GiB gp3, us-east-2a, in-use)
+
+==> [3] Etiquetas del snapshot (Project, Env, Owner)
+    Project=PgGuardian Env=prod Owner=Chus Avila
+
+==> [4] Creación del snapshot (aws ec2 create-snapshot)
+    vol-0ce09703b3674e7ac -> snap-051ae8ce89d78cf4e
+    descripción: PgGuardian: snapshot manual (estabilizacion) del disco sandbox vol-0ce09703b3674e7ac 2026-11-26T23:37:16Z
+
+==> [5] Espera hasta completed (aws ec2 wait snapshot-completed)
+    snap-051ae8ce89d78cf4e en completed.
+
+==> [6] Verificación con describe-snapshots (sin restaurar)
+    snap-051ae8ce89d78cf4e: completed 100%, 8 GiB, inicio 2026-11-26T23:37:17.584000+00:00, cifrado=true
+    etiquetas: Project=PgGuardian Env=prod Owner=Chus Avila
+
+==> [7] Resumen
+    disco sandbox (vol-0ce09703b3674e7ac) -> snap-051ae8ce89d78cf4e, completed, motivo estabilizacion.
+    El snapshot no pertenece al stack y se conserva si se borra el stack.
+
+RESULTADO: 2026-11-26T23:37:17.584000+00:00 sandbox vol-0ce09703b3674e7ac snap-051ae8ce89d78cf4e completed estabilizacion
+manual_snapshot.sh terminó sin errores.

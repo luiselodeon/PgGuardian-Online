@@ -1,0 +1,2 @@
+RESULTADO: 2026-11-26T23:36:23.687000+00:00 raiz vol-0b1efc51a5925d766 snap-0d9ae85bf59f6608a completed estabilizacion
+RESULTADO: 2026-11-26T23:37:17.584000+00:00 sandbox vol-0ce09703b3674e7ac snap-051ae8ce89d78cf4e completed estabilizacion

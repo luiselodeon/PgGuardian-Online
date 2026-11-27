@@ -1,0 +1,28 @@
+{
+    "AlarmHistoryItems": [
+        {
+            "AlarmName": "PgGuardian-Recover",
+            "AlarmType": "MetricAlarm",
+            "Timestamp": "2026-11-26T23:22:53.404000+00:00",
+            "HistoryItemType": "StateUpdate",
+            "HistorySummary": "Alarm updated from ALARM to OK",
+            "HistoryData": "{\"version\":\"1.0\",\"oldState\":{\"stateValue\":\"ALARM\",\"stateReason\":\"Prueba T-21 (runbook 8.1.3): ALARM forzado a mano\"},\"newState\":{\"stateValue\":\"OK\",\"stateReason\":\"Threshold Crossed: 2 datapoints [0.0 (26/11/26 23:21:00), 0.0 (26/11/26 23:20:00)] were not greater than or equal to the threshold (1.0).\",\"stateReasonData\":{\"version\":\"1.0\",\"queryDate\":\"2026-11-26T23:22:53.402+0000\",\"startDate\":\"2026-11-26T23:20:00.000+0000\",\"statistic\":\"Maximum\",\"period\":60,\"recentDatapoints\":[0.0,0.0],\"threshold\":1.0,\"evaluatedDatapoints\":[{\"timestamp\":\"2026-11-26T23:21:00.000+0000\",\"sampleCount\":1.0,\"value\":0.0}]}}}"
+        },
+        {
+            "AlarmName": "PgGuardian-Recover",
+            "AlarmType": "MetricAlarm",
+            "Timestamp": "2026-11-26T23:21:43.895000+00:00",
+            "HistoryItemType": "Action",
+            "HistorySummary": "Action completed successfully",
+            "HistoryData": "{\"actionState\":\"Succeeded\",\"stateUpdateTimestamp\":1795735303426,\"notificationResource\":\"arn:aws:automate:us-east-2:ec2:recover\",\"publishedMessage\":null,\"error\":null,\"muteWindowEndTimestamp\":null}"
+        },
+        {
+            "AlarmName": "PgGuardian-Recover",
+            "AlarmType": "MetricAlarm",
+            "Timestamp": "2026-11-26T23:21:43.426000+00:00",
+            "HistoryItemType": "StateUpdate",
+            "HistorySummary": "Alarm updated from OK to ALARM",
+            "HistoryData": "{\"version\":\"1.0\",\"oldState\":{\"stateValue\":\"OK\",\"stateReason\":\"Threshold Crossed: no datapoints were received for 2 periods and 2 missing datapoints were treated as [NonBreaching].\",\"stateReasonData\":{\"version\":\"1.0\",\"queryDate\":\"2026-11-26T03:26:06.200+0000\",\"statistic\":\"Maximum\",\"period\":60,\"recentDatapoints\":[],\"threshold\":1.0,\"evaluatedDatapoints\":[{\"timestamp\":\"2026-11-26T03:25:00.000+0000\"}]}},\"newState\":{\"stateValue\":\"ALARM\",\"stateReason\":\"Prueba T-21 (runbook 8.1.3): ALARM forzado a mano\"}}"
+        }
+    ]
+}
