@@ -3596,7 +3596,7 @@ Consulta directa, para guardar la salida en la evidencia. El segundo comando lis
 SELLO=$(date -u +%Y%m%dT%H%MZ)
 aws budgets describe-notifications-for-budget --account-id "$ACCOUNT_ID" --budget-name "$BUDGET_NAME" \
   --output json | tee "docs/aws/evidencia/costos/notificaciones-$SELLO.json"
-jq -c '(.Notifications // [])[] | {NotificationType, ComparisonOperator, Threshold, ThresholdType}' \
+jq -c '(.Notifications // [])[] | {NotificationType, ComparisonOperator, Threshold, ThresholdType: (.ThresholdType // "PERCENTAGE")}' \
     "docs/aws/evidencia/costos/notificaciones-$SELLO.json" |
   while read -r notif; do
     echo "== $notif"
@@ -3636,7 +3636,7 @@ Evaluación automática del criterio. Pegar el bloque completo en CloudShell des
   else
     # Clave de cada notificación: tipo|operador|umbral|tipo de umbral. "+ 0" deja 50.0 como 50.
     observadas=$(jq -c '[(.Notifications // [])[]
-      | "\(.NotificationType)|\(.ComparisonOperator)|\(.Threshold + 0)|\(.ThresholdType)"]' <<< "$salida")
+      | "\(.NotificationType)|\(.ComparisonOperator)|\(.Threshold + 0)|\((.ThresholdType // "PERCENTAGE"))"]' <<< "$salida")
     total=$(jq 'length' <<< "$observadas")
     faltan=$(jq -nr --argjson e "$esperadas" --argjson o "$observadas" '($e - $o) | join(", ")')
     sobran=$(jq -nr --argjson e "$esperadas" --argjson o "$observadas" '($o - $e) | join(", ")')
@@ -3646,7 +3646,7 @@ Evaluación automática del criterio. Pegar el bloque completo en CloudShell des
     [ -n "$sobran" ] && fallos+=("sobran: $sobran")
     # Duplicados de una notificación esperada: no aparecen en "sobran" pero suben el total.
     while read -r notif; do
-      clave=$(jq -r '"\(.NotificationType)|\(.ComparisonOperator)|\(.Threshold + 0)|\(.ThresholdType)"' <<< "$notif")
+      clave=$(jq -r '"\(.NotificationType)|\(.ComparisonOperator)|\(.Threshold + 0)|\((.ThresholdType // "PERCENTAGE"))"' <<< "$notif")
       if ! subs=$(aws budgets describe-subscribers-for-notification --account-id "$ACCOUNT_ID" \
             --budget-name "$BUDGET_NAME" --notification "$notif" --output json 2>&1); then
         errores+=("$clave: $(echo "$subs" | tr '\n' ' ')")
@@ -3659,7 +3659,7 @@ Evaluación automática del criterio. Pegar el bloque completo en CloudShell des
       { [ "$n_correo" -lt 1 ] || [ "$n_correo" -gt 5 ]; } \
         && fallos+=("$clave con $n_correo destinatarios de correo (se esperaban de 1 a 5)")
       [ "$con_alerta" -eq 0 ] && fallos+=("$clave sin AlertEmail entre los destinatarios")
-    done < <(jq -c '(.Notifications // [])[] | {NotificationType, ComparisonOperator, Threshold, ThresholdType}' <<< "$salida")
+    done < <(jq -c '(.Notifications // [])[] | {NotificationType, ComparisonOperator, Threshold, ThresholdType: (.ThresholdType // "PERCENTAGE")}' <<< "$salida")
     if [ ${#errores[@]} -gt 0 ]; then
       estado="no_verificable"
       detalle="falló aws budgets describe-subscribers-for-notification: $(printf '%s; ' "${errores[@]}" | sed 's/; $//')"
@@ -4630,9 +4630,9 @@ El bloque guarda la identidad de la Instancia y el `boot_id` del kernel, fuerza 
       e2="no_aprobado"
       d2="no conforme: sin entrada Action en el historial tras el paso a ALARM ($t_alarm); revisar ActionsEnabled y AlarmActions (8.1.2)"
     else
-      t_acc=$(jq -r '.Timestamp' <<< "$accion"); resumen=$(jq -r '.HistorySummary // ""' <<< "$accion")
+      t_acc=$(jq -r '.Timestamp' <<< "$accion"); resumen=$(jq -r '.HistorySummary // ""' <<< "$accion"); datos=$(jq -r '.HistoryData // ""' <<< "$accion")
       dt=$(( $(date -u -d "$t_acc" +%s) - $(date -u -d "$t_alarm" +%s) ))
-      if grep -qF "$RECOVER_ARN" <<< "$resumen" && grep -qi 'success' <<< "$resumen"; then
+      if grep -qF "$RECOVER_ARN" <<< "$datos" && grep -qi 'success' <<< "$resumen"; then
         if [ "$dt" -le 60 ]; then
           e2="aprobado"
           d2="ALARM a las $t_alarm; acción ejecutada $dt s después: $resumen; vuelta a OK $vuelta (${t_ok:-sin registro})"

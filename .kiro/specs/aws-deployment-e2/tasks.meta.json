@@ -400,6 +400,73 @@
         "chatSessionId": "sess_16ead047-855a-4e67-bf63-fe389777f1bc",
         "timestamp": 1795728791486
       }
+    ],
+    "9.1 T-23: Script de ZAP baseline": [
+      {
+        "executionId": "9dabef7f-1cf1-4b07-9e30-4c121b1448e4",
+        "chatSessionId": "sess_6fc3da33-9dd8-4fc5-98c7-bedbda01fa0a",
+        "timestamp": 1795747500726
+      },
+      {
+        "executionId": "9dabef7f-1cf1-4b07-9e30-4c121b1448e4",
+        "chatSessionId": "sess_6fc3da33-9dd8-4fc5-98c7-bedbda01fa0a",
+        "timestamp": 1795747797705
+      }
+    ],
+    "9.2 T-24: Script de `nmap`": [
+      {
+        "executionId": "9dabef7f-1cf1-4b07-9e30-4c121b1448e4",
+        "chatSessionId": "sess_6fc3da33-9dd8-4fc5-98c7-bedbda01fa0a",
+        "timestamp": 1795747501723
+      },
+      {
+        "executionId": "9dabef7f-1cf1-4b07-9e30-4c121b1448e4",
+        "chatSessionId": "sess_6fc3da33-9dd8-4fc5-98c7-bedbda01fa0a",
+        "timestamp": 1795747798734
+      }
+    ],
+    "9.3 T-25: Estructura de evidencia de CA-01 a CA-08": [
+      {
+        "executionId": "9dabef7f-1cf1-4b07-9e30-4c121b1448e4",
+        "chatSessionId": "sess_6fc3da33-9dd8-4fc5-98c7-bedbda01fa0a",
+        "timestamp": 1795747502878
+      },
+      {
+        "executionId": "9dabef7f-1cf1-4b07-9e30-4c121b1448e4",
+        "chatSessionId": "sess_6fc3da33-9dd8-4fc5-98c7-bedbda01fa0a",
+        "timestamp": 1795747800148
+      }
+    ],
+    "9.4 T-26: Registro de decisiones": [
+      {
+        "executionId": "9dabef7f-1cf1-4b07-9e30-4c121b1448e4",
+        "chatSessionId": "sess_6fc3da33-9dd8-4fc5-98c7-bedbda01fa0a",
+        "timestamp": 1795747503890
+      },
+      {
+        "executionId": "9dabef7f-1cf1-4b07-9e30-4c121b1448e4",
+        "chatSessionId": "sess_6fc3da33-9dd8-4fc5-98c7-bedbda01fa0a",
+        "timestamp": 1795747801658
+      }
+    ],
+    "9.5 Secciones del documento de requisitos original (sin T-xx; documentación)": [
+      {
+        "executionId": "9dabef7f-1cf1-4b07-9e30-4c121b1448e4",
+        "chatSessionId": "sess_6fc3da33-9dd8-4fc5-98c7-bedbda01fa0a",
+        "timestamp": 1795747505047
+      },
+      {
+        "executionId": "9dabef7f-1cf1-4b07-9e30-4c121b1448e4",
+        "chatSessionId": "sess_6fc3da33-9dd8-4fc5-98c7-bedbda01fa0a",
+        "timestamp": 1795747802760
+      }
+    ],
+    "9. Fase 6: evidencia, registro de decisiones y documentación (T-23 a T-26)": [
+      {
+        "executionId": "9dabef7f-1cf1-4b07-9e30-4c121b1448e4",
+        "chatSessionId": "sess_6fc3da33-9dd8-4fc5-98c7-bedbda01fa0a",
+        "timestamp": 1795747802894
+      }
     ]
   }
 }

@@ -228,20 +228,20 @@ Lenguajes: Python (FastAPI, unittest), JavaScript (React/Vite), YAML (Compose y 
 - [x] 8. Checkpoint: infraestructura y scripts
   - Ensure all tests pass, ask the user if questions arise.
 
-- [ ] 9. Fase 6: evidencia, registro de decisiones y documentación (T-23 a T-26)
-  - [ ] 9.1 T-23: Script de ZAP baseline
+- [x] 9. Fase 6: evidencia, registro de decisiones y documentación (T-23 a T-26)
+  - [x] 9.1 T-23: Script de ZAP baseline
     - Crear `scripts/aws/run_zap.sh` (`ghcr.io/zaproxy/zaproxy:stable zap-baseline.py`, reporte HTML con fecha, hora y URL en `docs/aws/evidencia/`) y la plantilla `docs/aws/evidencia/justificaciones.md` para hallazgos medios o altos y puertos extra.
     - _RF-08.2 · CA-27 · Requirements: 25.1, 25.2, 25.6_
 
-  - [ ] 9.2 T-24: Script de `nmap`
+  - [x] 9.2 T-24: Script de `nmap`
     - Crear `scripts/aws/run_nmap.sh` (`nmap -Pn -p 1-65535 <eip>`, salida con fecha en `docs/aws/evidencia/`), con aviso si hay puertos abiertos distintos de 80 y 443.
     - _RF-08.2 · CA-27 · Requirements: 25.3, 25.4, 25.6_
 
-  - [ ] 9.3 T-25: Estructura de evidencia de CA-01 a CA-08
+  - [x] 9.3 T-25: Estructura de evidencia de CA-01 a CA-08
     - Crear `docs/aws/evidencia/ca-01..ca-08/` con una plantilla por criterio (URL pública, resultado aprobado/fallido y evidencia: captura, o marca de tiempo del fragmento de la grabación del video en que se ve la URL pública) y un índice del Paquete_Evidencia (`docs/aws/evidencia/README.md`).
     - _RF-08.2 · CA-01 a CA-08, CA-27 · Requirements: 25.5, 25.6_
 
-  - [ ] 9.4 T-26: Registro de decisiones
+  - [x] 9.4 T-26: Registro de decisiones
     - Completar `docs/aws/decision-log.md` (creado en la tarea 1.10 con la entrada R24.7 y ampliado en la tarea 4.2 con la decisión de diseño de T-10) hasta tener las diez entradas de R24.1 a R24.10, además de esa decisión, con los campos `requisito_afectado`, `cambio`, `justificacion`, `fecha` AAAA-MM-DD y `aprobador`:
       - R24.1: RF-01.4, disco propio del sandbox, justificación «un script que llena el disco no puede tumbar `app_db`».
       - R24.2: RF-03.3, Session Manager con el puerto 22 cerrado, justificación «las IP domésticas cambian».
@@ -256,7 +256,7 @@ Lenguajes: Python (FastAPI, unittest), JavaScript (React/Vite), YAML (Compose y 
     - Añadir una columna o lista de aprobación (nombre y fecha, en ≤ 2 días hábiles) y una lista de cierre de T-26 que marque como no aprobada toda entrada sin campo o sin aprobación.
     - _RF-08.1 · CA-27 · Requirements: 24.1, 24.2, 24.3, 24.4, 24.5, 24.6, 24.7, 24.8, 24.9, 24.10, 24.11, 24.12_
 
-  - [ ] 9.5 Secciones del documento de requisitos original (sin T-xx; documentación)
+  - [x] 9.5 Secciones del documento de requisitos original (sin T-xx; documentación)
     - Redactar en `PgGuardian - Requisitos del Entregable 2 (AWS).md` las secciones de alcance del E2 (debe indicar que el E2 es el despliegue en AWS y no el alcance multi-cliente original: el registro de usuarios se entregó en el E1 y la conexión a bases propias del cliente pasa a Mejoras futuras, según R24.9; y que la evaluación es con un video que muestra el funcionamiento desde la URL pública), plan de trabajo (fases 1 a 6 y su orden) y proceso estándar.
     - _Documentación del E2 · Requirements: 28.1, 28.2, 28.3, 24.9_
 

@@ -149,3 +149,49 @@ Las fases van en orden; dentro de cada fase, las tareas pueden repartirse entre 
 
 - **Política de operadores.** La propuesta menciona que «la política de operadores depende de las etiquetas», pero no define un grupo de operadores. Si los otros dos integrantes necesitan reiniciar la instancia o entrar por SSM sin ser administradores, hay que crear ese grupo con permisos limitados a los recursos con `Project=PgGuardian`.
 - **Restauración de `app_db`.** Un snapshot de EBS con PostgreSQL encendido es consistente solo ante fallos. Si se quiere una copia lógica, conviene agregar un `pg_dump` periódico de `app_db`.
+
+## 7. Alcance del E2
+
+El E2 es el **despliegue de PgGuardian en AWS**. No es el alcance multi-cliente que planteaba originalmente la práctica de definición de requisitos («multi-cliente con registro de usuarios y de bases propias»). El Equipo lo decidió así: el E1 es el desarrollo y el E2 es el despliegue.
+
+- **Registro de usuarios:** ya se entregó en el E1 (RF-01 a RF-03) y en el E2 solo se despliega y se verifica desde la URL pública (CA-01 a CA-08).
+- **Conexión a bases propias del cliente:** registrar una base PostgreSQL del cliente con una credencial de solo lectura y auditarla de forma continua queda fuera del E2 y pasa a la sección «Mejoras futuras» de la especificación (`.kiro/specs/aws-deployment-e2/requirements.md`).
+- **Qué incluye el E2:** el endurecimiento del código y la configuración (RF-04), la cuenta, IAM y el acceso al servidor (RF-05), la infraestructura en EC2 (RF-06), la operación, los costos y los respaldos (RF-07), y la documentación y la evidencia (RF-08).
+
+El cambio de alcance está registrado en `docs/aws/decision-log.md` como decisión del Equipo, con el requisito afectado «alcance del E2 en la práctica de definición de requisitos».
+
+**Evaluación.** El E2 se evalúa con un video grabado que muestra el funcionamiento de la aplicación desde la URL pública HTTPS, no con acceso en vivo. Por eso la instancia se enciende o se detiene a criterio del Equipo y no tiene que estar disponible 24/7; para la grabación se enciende y la aplicación vuelve sola por la misma URL. El video sirve también como evidencia de CA-01 a CA-08: cada criterio se identifica por su marca de tiempo, siempre que la URL pública se vea en pantalla.
+
+## 8. Plan de trabajo
+
+El trabajo se divide en seis fases que se ejecutan en este orden. Una fase empieza cuando la anterior terminó y sus criterios quedaron verificados; dentro de cada fase, las tareas pueden repartirse entre integrantes.
+
+```text
+Fase 1 → T-08 → Fase 2 → Fase 3 → Fase 4 → Fase 5 → Fase 6
+```
+
+| Fase | Contenido | Tareas | Resultado para pasar a la siguiente |
+| --- | --- | --- | --- |
+| 1 · Código (local) | Endurecimiento de `docker-compose.prod.yml`, `Caddyfile` y `/api/health-check`, y retiro de las llamadas del frontend de producción a los endpoints que dependen de TiendaDB. | T-01 a T-07, más la tarea del frontend (sin T-xx) | Cambios hechos en local. |
+| 1 → 2 · Verificación local | `docker compose up` en local sigue funcionando (RNF-05) y se abre el PR. | T-08 | PR revisado y fusionado. |
+| 2 · Cuenta e IAM | Protección de la cuenta raíz, política *Force MFA*, grupo `PgG-Admins` y un usuario IAM por integrante con MFA. | T-09, T-10 | CA-15 y CA-16 verificados. |
+| 3 · Stack CloudFormation | Despliegue desde CloudShell del stack `pgguardian` (plantilla `infra/cloudformation/pgguardian.yaml`): rol de la instancia, Security Group, instancia, volumen del sandbox, Elastic IP, presupuesto, Cost Anomaly Detection y alarma *recover*. | T-11 a T-15, T-19 a T-21 (recursos de la plantilla) | Stack en `CREATE_COMPLETE` con sus outputs. |
+| 4 · Host y despliegue | Swap, `unattended-upgrades`, Docker y montaje de `/srv/sandbox` desde Session Manager; `.env` con permisos `600`; `docker compose up` y certificado de Let's Encrypt. | T-16, T-17, T-18 | La URL pública responde por HTTPS sin advertencias (CA-23). |
+| 5 · Costos y resiliencia | Verificación del presupuesto, de Cost Anomaly Detection y de la alarma *recover*; primer snapshot manual por disco; borrado del secreto huérfano de Secrets Manager. | T-19 a T-21 (verificación), T-22, T-27, secreto huérfano (sin T-xx) | CA-24, CA-25 y CA-26 verificados. |
+| 6 · Evidencia, registro y documentación | ZAP baseline, `nmap`, CA-01 a CA-08 desde la URL pública, registro de decisiones con aprobación y las secciones 7 a 9 de este documento. | T-23 a T-26, documentación (sin T-xx) | CA-27 verificado y video grabado. |
+
+El orden responde a las dependencias: la infraestructura no se crea hasta que el código pasa la verificación local, para no llevar regresiones a la instancia; la Fase 3 necesita usuarios IAM con MFA; la Fase 4 necesita la instancia y la Elastic IP del stack; y la evidencia de la Fase 6 solo puede tomarse con el sistema desplegado. El snapshot previo a la demo (T-27) se toma antes de grabar el video.
+
+## 9. Proceso estándar
+
+Estas reglas aplican a todo el trabajo del E2, en cualquier fase.
+
+1. **Cambios de código.** Todo cambio va en una rama y llega a `main` por PR, después de verificar en local que `docker compose up` sigue funcionando.
+2. **Acceso a AWS.** Cada integrante opera con su usuario IAM y MFA activo. Nadie usa la cuenta raíz ni crea access keys; la CLI se usa desde CloudShell en `us-east-2`.
+3. **Cambios de infraestructura.** La infraestructura solo se modifica con un change set del stack `pgguardian`, revisado antes de ejecutarlo. Si el change set marca la instancia con `Replacement=True`, no se ejecuta. La única excepción a «solo por change set» es desactivar la protección contra terminación justo antes de borrar el stack.
+4. **Acceso al servidor.** El servidor se administra solo con Session Manager; el puerto 22 permanece cerrado y no se reparten llaves `.pem`.
+5. **Pasos y verificaciones.** Los pasos manuales y los comandos de verificación siguen `docs/aws/runbook.md`. Cada verificación queda como `aprobado`, `no_aprobado` o `no_verificable`; un criterio solo se da por aprobado cuando todos sus bloques están en `aprobado`. Si uno falla, se corrige la causa y se repite, conservando la línea anterior.
+6. **Evidencia.** La salida de cada comando, o la captura en los pasos manuales, se guarda en `docs/aws/evidencia/` con fecha, hora y nombre de quien la ejecutó. Nunca se guardan secretos (`JWT_SECRET`, contraseñas) en la evidencia ni en el repositorio.
+7. **Desviaciones.** Toda desviación del E1 o de este documento se registra en `docs/aws/decision-log.md` con requisito afectado, cambio, justificación, fecha (AAAA-MM-DD) y aprobador. El Equipo anota la aprobación en un plazo de 2 días hábiles; una entrada sin algún campo o sin aprobación se considera no aprobada.
+8. **Encendido y costos.** La instancia se enciende y se detiene según la sección «Encender y detener» del runbook. El presupuesto de 30 USD y Cost Anomaly Detection avisan por correo si el gasto se desvía.
+9. **Respaldos.** Se toman dos snapshots manuales por disco: uno al estabilizar el sistema (T-22) y otro antes de grabar el video (T-27). Cada uno se da por bueno cuando queda en `completed`; si queda en `error`, se repite.
