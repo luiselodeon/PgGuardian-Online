@@ -103,3 +103,15 @@ Esta entrada no corresponde a ninguno de los criterios R24.1 a R24.10: registra 
 | `justificacion` | El 2026-11-26 el repositorio `luiselodeon/PgGuardian-Online` se hizo público. Con el repositorio público, el clon por HTTPS no necesita credenciales en la Instancia: no queda ninguna clave ni token que guardar, rotar o revocar. El mismo día, después de hacerlo público, se revisó el historial completo (git log -p --all --no-textconv) en busca de claves AWS, llaves privadas, tokens de GitHub, archivos .env y contraseñas: sin hallazgos de secretos reales (solo placeholders, valores por defecto de desarrollo y datos de prueba). Alternativas: (B) deploy key de solo lectura por SSH, necesaria solo si el repositorio es privado; (C) token personal (PAT), que tiene más alcance y queda ligado a un usuario. |
 | `fecha` | 2026-11-26 |
 | `aprobador` | *pendiente* (se anota en la especificación en un máximo de 2 días hábiles, R24.11) |
+
+### CA-06: /api/full-scan devolvía 500 sin cookie
+
+Esta entrada no corresponde a ninguno de los criterios R24.1 a R24.10: registra un hallazgo del despliegue, no una desviación de la fuente. Usa los mismos campos y la misma regla de aprobación (R24.11, R24.12).
+
+| Campo | Valor |
+| --- | --- |
+| `requisito_afectado` | Hallazgo del despliegue, CA-06 (sin sesión, los endpoints protegidos responden 401). No cambia criterios de verificación. |
+| `cambio` | En `backend/api/main.py`, la autenticación de `/api/full-scan` pasa al parámetro `dependencies=[Depends(get_current_user)]` del decorador y la función solo recibe `conn=Depends(get_connection)`. Se agrega `backend/tests/test_full_scan_auth.py`, que comprueba 401 sin cookie aunque `get_connection` falle. |
+| `justificacion` | FastAPI resolvía `get_connection` antes que `get_current_user` por el orden de los parámetros; sin cookie intentaba conectar a TiendaDB, que no existe en producción, y respondía 500 en lugar de 401. Las dependencias de la ruta se resuelven antes que las de la función. Limitación conocida: con sesión, `/api/full-scan` sigue fallando en producción porque escanea TiendaDB, que solo existe en desarrollo (`docker-compose.yml`); la interfaz de producción no lo llama (ver entrada R24.7). |
+| `fecha` | 2026-11-26 |
+| `aprobador` | *pendiente* (se anota en la especificación en un máximo de 2 días hábiles, R24.11) |

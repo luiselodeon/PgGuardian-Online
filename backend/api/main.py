@@ -195,10 +195,9 @@ def health_check():
             conn.close()
 
 
-@app.get("/api/full-scan", response_model=FullScanResponse)
+@app.get("/api/full-scan", response_model=FullScanResponse, dependencies=[Depends(get_current_user)])
 def full_scan(
     conn=Depends(get_connection),
-    _current_user: dict = Depends(get_current_user),
 ):
     """
     Ejecuta TODOS los detectores sobre la conexión fija local (TiendaDB)

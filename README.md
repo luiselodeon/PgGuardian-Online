@@ -60,3 +60,5 @@ docker compose up -d
 <br>
 **Liga del video demo** https://youtu.be/Xy6WHuwOaY0
 
+### 5. Pruebas del backend (opcional)
+Desde `backend/`, en un entorno virtual: `pip install -r requirements-dev.txt` y luego `python -m unittest`. `requirements-dev.txt` agrega `httpx` (lo usa `TestClient`) y no se instala en la imagen de producción.
