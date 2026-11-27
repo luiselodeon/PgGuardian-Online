@@ -18,9 +18,9 @@ Si la URL o la IP cambian, se actualizan aquí y en el registro de cada criterio
 
 | Artefacto | Archivo | Cómo se genera | Requisito | Estado |
 | --- | --- | --- | --- | --- |
-| Reporte de ZAP baseline (HTML completo, con fecha, hora y URL analizada) | `zap-baseline-<AAAAMMDDTHHMMZ>.html`, con `.json` y `.txt` del mismo nombre | `bash scripts/aws/run_zap.sh` | R25.1, R25.2 | `<pendiente o archivo final>` |
+| Reporte de ZAP baseline (HTML completo, con fecha, hora y URL analizada) | `zap-baseline-20261127T0321Z.html`, con `.json` del mismo nombre (`zap.yaml` es el plan de Automation Framework que generó ZAP) | `bash scripts/aws/run_zap.sh` | R25.1, R25.2 | Final: ejecución 2026-11-27T03:22:00Z contra https://3-14-31-64.sslip.io. 0 FAIL, 8 WARN (2 reglas de riesgo medio, 3 alertas, justificadas en `justificaciones.md`; 2 reglas bajas y 4 informativas documentadas sin acción), 60 PASS |
 | Salida de `nmap` (TCP 1 a 65535 contra la Elastic IP, con fecha y hora) | `nmap-<AAAAMMDDTHHMMZ>.txt` | `bash scripts/aws/run_nmap.sh` | R25.3, R25.4 | `<pendiente o archivo final>` |
-| Justificaciones de hallazgos de ZAP medios o altos y de puertos distintos de 80 y 443 | [`justificaciones.md`](justificaciones.md) | Se llena a mano después de cada ejecución de ZAP y `nmap` | R25.2, R25.4 | `<sin entradas o n entradas>` |
+| Justificaciones de hallazgos de ZAP medios o altos y de puertos distintos de 80 y 443 | [`justificaciones.md`](justificaciones.md) | Se llena a mano después de cada ejecución de ZAP y `nmap` | R25.2, R25.4 | 3 entradas de ZAP (Z-1 a Z-3), sin entradas de puertos |
 | Resultados de CA-01 a CA-08 desde la URL pública | [`ca-01/`](ca-01/README.md) a [`ca-08/`](ca-08/README.md) | Registro por criterio (tabla de la sección 2) | R25.5 | Ver sección 2 |
 
 Si se ejecuta ZAP o `nmap` más de una vez, la fila apunta al archivo de la última ejecución y los anteriores se conservan como historial.

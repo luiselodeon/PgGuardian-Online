@@ -278,6 +278,16 @@ Esta entrada no corresponde a ninguno de los criterios R24.1 a R24.10: registra 
 | `justificacion` | AWS no considera el ID de cuenta un secreto, y un force push rompería los clones del Equipo. |
 | `fecha` | 2026-11-26 |
 | `aprobador` | Chus Avila (2026-11-26) |
+### Hallazgos de ZAP baseline aceptados
+Esta entrada no corresponde a ninguno de los criterios R24.1 a R24.10: registra un hallazgo de ejecución, no una desviación de la fuente. Usa los mismos campos y la misma regla de aprobación (R24.11, R24.12).
+
+| Campo | Valor |
+| --- | --- |
+| `requisito_afectado` | R25.2 / CA-27 |
+| `cambio` | El reporte `zap-baseline-20261127T0321Z.html` (0 FAIL, 8 WARN, 60 PASS) deja tres alertas de riesgo medio sin corregir: CSP sin `form-action` ni `base-uri` (10055), CSP con `'unsafe-inline'` en `style-src` (10055) y hoja de Google Fonts sin SRI (90003). No se cambia el `Caddyfile` ni `frontend/index.html`. |
+| `justificacion` | La SPA no envía formularios a otros orígenes ni inserta contenido de usuario con `<base>`; `'unsafe-inline'` solo está en `style-src`; Google sirve CSS distinto por user-agent, así que un hash SRI fijo no es viable, y la CSP limita `style-src` y `font-src` a Google Fonts. Corregir la CSP exige re-verificar CA-13. Detalle en `docs/aws/evidencia/justificaciones.md` (Z-1 a Z-3). |
+| `fecha` | 2026-11-26 |
+| `aprobador` | Chus Avila (2026-11-26) |
 ## Aprobaciones
 
 Cada entrada se aprueba anotando aquí el nombre del aprobador y la fecha de aprobación (AAAA-MM-DD), en un máximo de 2 días hábiles desde la fecha de la entrada (R24.11). Al aprobar, el mismo nombre se copia al campo `aprobador` de la entrada. «Fecha límite» es la fecha de la entrada más 2 días hábiles (lunes a viernes). Las celdas vacías se llenan a mano por el Equipo.
@@ -306,6 +316,7 @@ Cada entrada se aprueba anotando aquí el nombre del aprobador y la fecha de apr
 | R27: sin Secreto_Huerfano en us-east-2 | 2026-11-26 | 2026-11-30 | Chus Avila | 2026-11-26 |
 | Paso 4.9 del runbook: snapshots anteriores borrados | 2026-11-26 | 2026-11-30 | Chus Avila | 2026-11-26 |
 | ID de cuenta en el historial público | 2026-11-26 | 2026-11-30 | Chus Avila | 2026-11-26 |
+| Hallazgos de ZAP baseline aceptados | 2026-11-26 | 2026-11-30 | Chus Avila | 2026-11-26 |
 
 ## Lista de cierre de T-26
 
@@ -335,6 +346,7 @@ T-26 solo se cierra cuando todas las filas están en «aprobada». Una entrada a
 | R27: sin Secreto_Huerfano | Sí | Sí | Sí | Sí | Sí | Sí | **aprobada** |
 | Paso 4.9: snapshots anteriores | Sí | Sí | Sí | Sí | Sí | Sí | **aprobada** |
 | Historial: ID de cuenta | Sí | Sí | Sí | Sí | Sí | Sí | **aprobada** |
+| Hallazgos de ZAP baseline aceptados | Sí | Sí | Sí | Sí | Sí | Sí | **aprobada** |
 
 Para cerrar T-26:
 
@@ -342,4 +354,4 @@ Para cerrar T-26:
 - [x] Cada entrada tiene nombre y fecha en «Aprobaciones», dentro de su fecha límite, y el mismo nombre en su campo `aprobador`.
 - [x] Todas las filas de la tabla anterior están en «aprobada».
 
-Estado de T-26 al 2026-11-26: **cerrada** (2026-11-26). Las 22 entradas tienen los campos `requisito_afectado`, `cambio`, `justificacion`, `fecha` y `aprobador`, y la aprobación de Chus Avila (2026-11-26) anotada en «Aprobaciones», dentro de su fecha límite.
+Estado de T-26 al 2026-11-26: **cerrada** (2026-11-26). Las 23 entradas tienen los campos `requisito_afectado`, `cambio`, `justificacion`, `fecha` y `aprobador`, y la aprobación de Chus Avila (2026-11-26) anotada en «Aprobaciones», dentro de su fecha límite.
